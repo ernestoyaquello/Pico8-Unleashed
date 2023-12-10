@@ -172,7 +172,7 @@ function create_dog(x,y)
 	 dz=0,
 	 spr_aux=spr_duration(),
 	 sprite=1,
-	 leash=create_leash(0),
+	 leash=create_leash(x,y,0),
 	 _update=update,
 	 _draw=draw,
 	}
@@ -245,6 +245,7 @@ end
 
 local leash={
  leash={},
+ last_dog_pos={x=0,y=0},
 }
 
 -- leash position relative
@@ -258,22 +259,22 @@ local leash={
 -- odd and inaccurate because
 -- this isn't real 3d at all.
 local leash_positions={
- [1]={x=12,y=7,z=-1},
- [2]={x=12,y=7,z=-1},
- [3]={x=12,y=7,z=-2},
- [4]={x=12,y=7,z=-2},
- [5]={x=12,y=7,z=-1},
- [6]={x=12,y=7,z=-1},
- [32]={x=12,y=7,z=-1},
- [33]={x=12,y=7,z=-2},
- [34]={x=12,y=7,z=-3},
- [35]={x=12,y=7,z=-3},
- [36]={x=12,y=7,z=-3},
- [37]={x=12,y=7,z=-2},
- [38]={x=12,y=7,z=-2},
- [39]={x=12,y=7,z=-2},
- [40]={x=12,y=7,z=-2},
- [41]={x=12,y=7,z=-1},
+ [1]={x=12,z=-1},
+ [2]={x=12,z=-1},
+ [3]={x=12,z=-2},
+ [4]={x=12,z=-2},
+ [5]={x=12,z=-1},
+ [6]={x=12,z=-1},
+ [32]={x=12,z=-1},
+ [33]={x=12,z=-2},
+ [34]={x=12,z=-3},
+ [35]={x=12,z=-3},
+ [36]={x=12,z=-3},
+ [37]={x=12,z=-2},
+ [38]={x=12,z=-2},
+ [39]={x=12,z=-2},
+ [40]={x=12,z=-2},
+ [41]={x=12,z=-1},
 }
 
 local function leash_rel_origin()
@@ -292,9 +293,10 @@ function leash._update()
 	local o=leash_rel_origin()
 	local new_leash={
   {
-   x=o.x,
-   y=o.y,
-   z=o.z+dog.z,
+   x=dog.x+o.x,
+   y=dog.y,
+   z=dog.z+o.z,
+   dy=0,
    dz=0,
   },
  }
@@ -302,30 +304,53 @@ function leash._update()
 	 local lp=new_leash[i-1]
 	 local p=leash.leash[i]
 	 
-	 -- update point position,
-	 -- avoiding entering the
-	 -- floor
-	 p.z+=p.dz 
+	 -- update point position
+	 p.x+=dog.x-leash.last_dog_pos.x
+	 p.y-=dog.y-leash.last_dog_pos.y
+	 p.y+=p.dy
+	 p.z+=p.dz
+	 
+	 -- avoid entering the floor
 	 if p.z>0 then
 	  p.z=0
 	  p.dz=0
 	 end
 	 
-	 -- update movement deltas
-	 local diff=p.z-lp.z
-	 local dist=abs(diff)
-	 if dist>1 then
+	 -- update y movement deltas
+	 local diff_y=p.y-lp.y
+	 local dist_y=abs(diff_y)
+	 if dist_y>=1 then
 	  -- move the point to catch
 	  -- up with its predecessor,
 	  -- which is now far
-	  if diff>0 then
+	  if diff_y>0 then
+	   -- point must move down
+	   p.y-=dist_y-1
+	   p.dy=-dist_y/2
+	  else
 	   -- point must move up
-	   p.z-=diff-1
-	   p.dz=-dist/2
+	   p.y-=diff_y+1
+	   p.dy=dist_y/2
+	  end
+	 else
+	  p.dy=0
+	 end
+	 
+	 -- update z movement deltas
+	 local diff_z=p.z-lp.z
+	 local dist_z=abs(diff_z)
+	 if dist_z>1 then
+	  -- move the point to catch
+	  -- up with its predecessor,
+	  -- which is now far
+	  if diff_z>0 then
+	   -- point must move up
+	   p.z-=diff_z-1
+	   p.dz=-dist_z/2
 	  else
 	   -- point must move down
-	   p.z-=diff+1
-	   p.dz=dist/2
+	   p.z-=diff_z+1
+	   p.dz=dist_z/2
 	  end
 	 else
 	  -- apply gravity
@@ -335,9 +360,15 @@ function leash._update()
 		  p.dz=0
 		 end
 	 end
+	 
 	 new_leash[#new_leash+1]=p
 	end
+	
+	-- finally update the leash
 	dog.leash.leash=new_leash
+	
+	-- store dog position
+	leash.last_dog_pos={x=dog.x,y=dog.y}
 end
 
 function leash._draw()
@@ -345,40 +376,43 @@ function leash._draw()
   local p=leash.leash[i]
   if i<#leash.leash then
 	  rectfill(
-	  dog.x-8+p.x,
-	  dog.y+p.y+p.z,
-	  dog.x-8+p.x,
-	  dog.y+p.y+p.z,
+	  p.x-8,
+	  p.y+7+p.z,
+	  p.x-7,
+	  p.y+7+p.z,
 	  2
 	 )
 	 else
 	  rectfill(
-	  dog.x-8+p.x-1,
-	  dog.y+p.y+p.z-1,
-	  dog.x-8+p.x,
-	  dog.y+p.y+p.z,
+	  p.x-8-1,
+	  p.y+p.z+7-1,
+	  p.x-8,
+	  p.y+p.z+7,
 	  0
 	 )
 	 end
  end
 end
 
-function create_leash(dog_z)
+function create_leash(dog_x,dog_y,dog_z)
 	local o=leash_rel_origin()
  leash.leash={
   {
-   x=o.x,
-   y=o.y,
-   z=o.z+dog_z,
+   x=dog_x+o.x,
+   y=dog_y,
+   z=dog_z+o.z,
+   dy=0,
    dz=0,
   },
  }
+ leash.last_dog_pos={x=dog_x,y=dog_y}
  for _=1,10 do
   local lp=leash.leash[#leash.leash]
   leash.leash[#leash.leash+1]={
    x=lp.x-1,
    y=lp.y,
    z=min(0,lp.z+1),
+   dy=0,
    dz=0,
   }
  end

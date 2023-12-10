@@ -22,9 +22,6 @@ function _draw()
  -- yellow for transparencies
  palt(0, false)
  palt(10, true)
-
- -- light gray background
- cls(6)
  
  -- draw the different elements
  camera(dog.x-50, 13) 
@@ -38,7 +35,22 @@ end
 -- dog info --
 
 local jump_acc=2.4
-local jump_reduction=0.35
+local gravity=0.35
+
+-- this will be a singleton,
+-- so this object should never
+-- be overriden
+local dog={
+ x=nil,
+ y=nil,
+ z=nil,
+ dx=nil,
+ dy=nil,
+ dz=nil,
+ spr_aux=nil,
+ sprite=nil,
+ leash=nil,
+}
 
 local function spr_duration()
  if scroll_speed!=0 then
@@ -47,7 +59,7 @@ local function spr_duration()
  return -1
 end
 
-local function update()
+function dog._update()
  -- apply gravity to jump,
  -- unless the jump button is
  -- clicked and the dog is
@@ -62,7 +74,7 @@ local function update()
   or dog.z<-13 -- too high
   or dog.dz>=-1.5 -- too slow
   then
-   dog.dz+=jump_reduction
+   dog.dz+=gravity
   end
  end
  
@@ -142,7 +154,14 @@ local function update()
 	dog.leash._update()
 end
 
-local function draw()
+function dog._draw()
+ local leash_behind=dog.leash.leash[#dog.leash.leash].y+2<dog.y
+
+ -- draw leash behind dog
+ if leash_behind then
+  dog.leash._draw()
+ end
+
  -- draw dog shadow
  local shadow=5
  if (dog.y+8<121) shadow=0
@@ -158,24 +177,24 @@ local function draw()
  local dog_y=dog.y+dog.z
  spr(dog.sprite, dog.x, dog_y)
  
- -- draw leash
- dog.leash._draw()
+ -- draw leash in front of dog
+ if not leash_behind then
+  dog.leash._draw()
+ end
 end
 
 function create_dog(x,y)
-	return {
-	 x=x,
-	 y=y,
-	 z=0,
-	 dx=0,
-	 dy=0,
-	 dz=0,
-	 spr_aux=spr_duration(),
-	 sprite=1,
-	 leash=create_leash(x,y,0),
-	 _update=update,
-	 _draw=draw,
-	}
+	dog.x=x
+	dog.y=y
+	dog.z=0
+	dog.dx=0
+	dog.dy=0
+	dog.dz=0
+	dog.spr_aux=spr_duration()
+	dog.sprite=1
+	dog.leash=create_leash(x,y,0)
+
+	return dog
 end
 -->8
 -- pub info --
@@ -243,9 +262,14 @@ end
 -->8
 -- leash info --
 
+local leash_length=10
+
+-- this will be a singleton,
+-- so this object should never
+-- be overriden
 local leash={
- leash={},
- last_dog_pos={x=0,y=0},
+ leash=nil,
+ last_dog_pos=nil,
 }
 
 -- leash position relative
@@ -277,6 +301,12 @@ local leash_positions={
  [41]={x=12,z=-1},
 }
 
+-- returns the position of the
+-- first point of the leash
+-- (the one attached to the
+-- dog's neck), which changes
+-- depending on the current dog
+-- sprite being used.
 local function leash_rel_origin()
  local p=leash_positions[1]
  if dog!=nil then
@@ -285,9 +315,6 @@ local function leash_rel_origin()
  return {x=p.x,y=p.y,z=p.z}
 end
 
--- todo: make the least also
--- move up and down with the
--- dog
 function leash._update()
 	-- update leash point by point
 	local o=leash_rel_origin()
@@ -301,6 +328,8 @@ function leash._update()
   },
  }
 	for i=2,#leash.leash do
+	 -- lp = last point
+	 --  p = current point
 	 local lp=new_leash[i-1]
 	 local p=leash.leash[i]
 	 
@@ -322,15 +351,13 @@ function leash._update()
 	 if dist_y>=1 then
 	  -- move the point to catch
 	  -- up with its predecessor,
-	  -- which is now far
+	  -- which is now too far
 	  if diff_y>0 then
-	   -- point must move down
 	   p.y-=dist_y-1
-	   p.dy=-dist_y/2
+	   p.dy=-dist_y/1.5
 	  else
-	   -- point must move up
 	   p.y-=diff_y+1
-	   p.dy=dist_y/2
+	   p.dy=dist_y/1.5
 	  end
 	 else
 	  p.dy=0
@@ -342,23 +369,37 @@ function leash._update()
 	 if dist_z>1 then
 	  -- move the point to catch
 	  -- up with its predecessor,
-	  -- which is now far
+	  -- which is now too far
 	  if diff_z>0 then
-	   -- point must move up
 	   p.z-=diff_z-1
 	   p.dz=-dist_z/2
 	  else
-	   -- point must move down
 	   p.z-=diff_z+1
 	   p.dz=dist_z/2
 	  end
 	 else
 	  -- apply gravity
 		 if p.z<0 then
-		  p.dz+=jump_reduction
+		  p.dz+=gravity
 		 else
 		  p.dz=0
 		 end
+	 end
+	 
+	 -- ensure there aren't gaps
+	 -- between this point and the
+	 -- previous one this one is
+	 -- attached to. these gaps
+	 -- could happen because we
+	 -- calculate the y and z
+	 -- independently above, which
+	 -- could lead to a distance
+	 -- of 2 between the points.
+	 local v_diff=(lp.y+lp.z)-(p.y+p.z)
+	 if v_diff>1 then
+	  p.y+=v_diff-1
+	 elseif v_diff<-1 then
+	  p.y+=v_diff+1
 	 end
 	 
 	 new_leash[#new_leash+1]=p
@@ -367,7 +408,6 @@ function leash._update()
 	-- finally update the leash
 	dog.leash.leash=new_leash
 	
-	-- store dog position
 	leash.last_dog_pos={x=dog.x,y=dog.y}
 end
 
@@ -375,17 +415,19 @@ function leash._draw()
  for i=1,#leash.leash do
   local p=leash.leash[i]
   if i<#leash.leash then
+   -- draw leash point
 	  rectfill(
-	  p.x-8,
+	  p.x-9,
 	  p.y+7+p.z,
-	  p.x-7,
+	  p.x-8,
 	  p.y+7+p.z,
 	  2
 	 )
 	 else
+	  -- draw leash handle
 	  rectfill(
-	  p.x-8-1,
-	  p.y+p.z+7-1,
+	  p.x-9,
+	  p.y+p.z+6,
 	  p.x-8,
 	  p.y+p.z+7,
 	  0
@@ -395,20 +437,26 @@ function leash._draw()
 end
 
 function create_leash(dog_x,dog_y,dog_z)
-	local o=leash_rel_origin()
- leash.leash={
-  {
-   x=dog_x+o.x,
-   y=dog_y,
-   z=dog_z+o.z,
-   dy=0,
-   dz=0,
-  },
+ leash.leash={}
+ leash.last_dog_pos={
+  x=dog_x,
+  y=dog_y,
  }
- leash.last_dog_pos={x=dog_x,y=dog_y}
- for _=1,10 do
+ 
+ -- initialise leash points,
+ -- starting with the one
+ -- attached to the dog's neck
+ local o=leash_rel_origin()
+ leash.leash[1]={
+  x=dog_x+o.x,
+  y=dog_y,
+  z=dog_z+o.z,
+  dy=0,
+  dz=0,
+ }
+ for i=2,leash_length do
   local lp=leash.leash[#leash.leash]
-  leash.leash[#leash.leash+1]={
+  leash.leash[i]={
    x=lp.x-1,
    y=lp.y,
    z=min(0,lp.z+1),

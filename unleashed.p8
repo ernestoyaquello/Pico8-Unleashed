@@ -4,7 +4,7 @@ __lua__
 function _init()
  scroll_speed=1.3
  dog=create_dog(50,115)
- buildings={
+ scenario={
   create_pub(-15,4),
   create_pub(-15+7*8,4),
   create_pub(-15+14*8,4),
@@ -29,8 +29,8 @@ function _draw()
  -- draw the different elements
  camera(dog.x-50, 13) 
  map()
- for _,building in ipairs(buildings) do
-   building._draw()
+ for _,element in ipairs(scenario) do
+   element._draw()
  end
 	dog._draw()
 end
@@ -39,12 +39,39 @@ end
 
 local jump_acc=2.4
 local jump_reduction=0.35
+local leash_positions={
+ [1]={x=12,y=6},
+ [2]={x=12,y=6},
+ [3]={x=12,y=5},
+ [4]={x=12,y=5},
+ [5]={x=12,y=6},
+ [6]={x=12,y=6},
+ [32]={x=12,y=6},
+ [33]={x=12,y=5},
+ [34]={x=12,y=4},
+ [35]={x=12,y=4},
+ [36]={x=12,y=4},
+ [37]={x=12,y=5},
+ [38]={x=12,y=5},
+ [39]={x=12,y=5},
+ [40]={x=12,y=5},
+ [41]={x=12,y=6},
+}
 
 local function spr_duration()
  if scroll_speed!=0 then
   return 5/scroll_speed
  end
  return -1
+end
+
+local function leash_origin()
+ if dog!=nil then
+  local p=leash_positions[flr(dog.sprite)]
+  return {x=p.x,y=p.y+dog.z}
+ end
+ 
+ return leash_positions[1]
 end
 
 local function update()
@@ -127,7 +154,7 @@ local function update()
 			end
 			dog.sprite=dog.spr_aux/frames_per_sprite
 		else
-		 dog.sprite=2
+		 dog.sprite=2 -- sitting down
 		end
 	else
 	 -- jumping: take the right
@@ -137,6 +164,49 @@ local function update()
 	 dog.sprite=32+9*((current_dz+jump_acc)/(2*jump_acc))
 	 dog.sprite=max(32,min(41,dog.sprite))
 	end
+	
+	-- todo: move leash code
+	-- update leash point by point
+	local o=leash_origin()
+	local new_leash={{x=o.x,y=o.y}}
+	for i=2,#dog.leash do
+	 local lp=new_leash[i-1]
+	 local p=dog.leash[i]
+	 
+	 -- update point position
+	 p.y+=p.dy
+	 if p.y>7 then
+	  p.y=7
+	  p.dy=0
+	 end
+	 
+	 -- update movement deltas
+	 local diff=p.y-lp.y
+	 local dist=abs(diff)
+	 if dist>1 then
+	  -- move the point to catch
+	  -- up with its predecessor,
+	  -- which is now far
+	  if diff>0 then
+	   -- point must move up
+	   p.y-=diff-1
+	   p.dy=-dist/2
+	  else
+	   -- point must move down
+	   p.y-=diff+1
+	   p.dy=dist/2
+	  end
+	 else
+	  -- apply gravity
+		 if p.y<7 then
+		  p.dy+=jump_reduction
+		 else
+		  p.dy=0
+		 end
+	 end
+	 new_leash[#new_leash+1]=p
+	end
+	dog.leash=new_leash
 end
 
 local function draw()
@@ -154,9 +224,31 @@ local function draw()
  -- draw dog sprite
  local dog_y=dog.y+dog.z
  spr(dog.sprite, dog.x, dog_y)
+ 
+ -- draw leash
+ for i=1,#dog.leash do
+  local p=dog.leash[i]
+  local lx=dog.x-8+p.x
+  local ly=dog.y+p.y
+  if i<#dog.leash then
+	  rectfill(lx,ly,lx,ly,2)
+	 else
+	  circfill(lx,ly,1,0)
+	 end
+ end
 end
 
 function create_dog(x,y)
+ local o=leash_origin()
+ local leash={{x=o.x,y=o.y,dy=0}}
+ for _=1,10 do
+  leash[#leash+1]={
+   x=leash[#leash].x-1,
+   y=min(7,leash[#leash].y+1),
+   dy=0,
+  }
+ end
+ 
 	return {
 	 x=x,
 	 y=y,
@@ -166,6 +258,7 @@ function create_dog(x,y)
 	 dz=0,
 	 spr_aux=spr_duration(),
 	 sprite=1,
+	 leash=leash,
 	 _update=update,
 	 _draw=draw,
 	}
@@ -223,6 +316,8 @@ function create_pub(x,y)
 	 {104,105,106,106,106,-105,-104}
 	}
  return {
+	 x=x,
+	 y=y,
   _draw=function()
    local offset={x=x,y=y}
    offset=draw(roof,offset)

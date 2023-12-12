@@ -4,17 +4,59 @@ __lua__
 function _init()
  scroll_speed=1.3
  dog=create_dog(50,115)
- scenario={
-  create_pub(-15,4),
-  create_pub(-15+7*8,4),
-  create_pub(-15+14*8,4),
- }
+ buildings={}
 end
 
 function _update60()
- if dog.x+78>128*8 then
-  scroll_speed=0
+ local start_x=dog.x-50
+ local end_x=dog.x-50+127
+ 
+ -- if we have reached the end
+ -- of the map, let's move
+ -- everything to its start to
+ -- make the horizontal
+ -- scrolling infinite
+ local map_end_x=(128*8)-1
+ if end_x>=map_end_x then
+  local offset=-map_end_x+127
+  dog.x+=offset
+  for _,b in ipairs(buildings) do
+   b.x+=offset
+  end
+  
+  start_x=dog.x-50
+  end_x=dog.x-50+127
+ end 
+
+ -- create a new list of
+ -- buildings to update the
+ -- scenario if needed
+ local new_buildings={}
+ 
+ -- add the existing buildings
+ -- to the new list, but only
+ -- if they are still within
+ -- view
+ local max_b_end_x=0
+ for i=1,#buildings do
+  local b=buildings[i]
+  local b_end_x=b.x+b.width-1
+  if b_end_x>=start_x then
+   new_buildings[#new_buildings+1]=b
+   max_b_end_x=max(max_b_end_x,b_end_x)
+  end
  end
+ 
+ -- add as many new buildings
+ -- as needed to fill the gap
+ while max_b_end_x<end_x do
+  local nb=create_pub(max_b_end_x+1,4)
+  new_buildings[#new_buildings+1]=nb
+  max_b_end_x+=nb.width
+ end
+ 
+ buildings=new_buildings
+
  dog._update()
 end
 
@@ -26,8 +68,8 @@ function _draw()
  -- draw the different elements
  camera(dog.x-50, 13) 
  map()
- for _,element in ipairs(scenario) do
-   element._draw()
+ for _,b in ipairs(buildings) do
+   b._draw()
  end
 	dog._draw()
 end
@@ -102,7 +144,7 @@ function dog._update()
 	end
  
  -- jump if needed and on floor
- if (btnp(❎) or btnp(🅾️))
+ if (btn(❎) or btn(🅾️))
  and dog.z==0
  then
   dog.dz=-jump_acc
@@ -126,6 +168,49 @@ function dog._update()
 	elseif dog.dy>0 then
 	 dog.dy=min(1.4,dog.dy)
 	end
+	
+	-- avoid collisions
+	local col_pts={
+  {dog.x+6,dog.y+6,dog.z},
+  {dog.x+6,dog.y+8,dog.z},
+ }
+ -- check if any of the two dog
+ -- points defined above are
+ -- overlapping any of the map
+ -- elements, and apply the
+ -- necessary corrections if so
+ for _,b in ipairs(buildings) do
+  for _,cp in ipairs(col_pts) do
+   -- col returns the necessary
+   -- corrections to apply to
+   -- the dog when the point we
+   -- are checking is actually
+   -- colliding
+   local col=b._collision(
+	   cp[1],cp[2],cp[3]
+	  )
+	  if col!=nil then
+	   -- correct dog position to
+	   -- stop the collision
+	   dog.x+=col[1]
+	   dog.y+=col[2]
+	   dog.z+=col[3]
+	   
+	   -- correct the table with
+	   -- the collision points
+	   -- for the next iteration
+	   col_pts[1]={
+	    dog.x+6,dog.y+6,dog.z
+	   }
+	   col_pts[2]={
+	    dog.x+6,dog.y+8,dog.z
+	   }
+	  end
+  end
+ end
+ 
+ -- todo: stop the dog from
+ -- getting out of bounds
 	
 	-- update the dog sprite
 	if current_dz==0 then
@@ -164,7 +249,9 @@ function dog._draw()
 
  -- draw dog shadow
  local shadow=5
- if (dog.y+8<121) shadow=0
+ if dog.y<113 and dog.y>40 then
+  shadow=0
+ end
  ovalfill(
   dog.x+1,
   dog.y+6,
@@ -200,32 +287,31 @@ end
 -- pub info --
 
 local function draw(sprts,offset)
- -- create zero offset if needed
- if (offset==nil) offset={}
- if (offset.x==nil) offset.x=0
- if (offset.y==nil) offset.y=0
- 
  -- draw element
- local x,y=0,0
- while y<#sprts do
-  while x<#sprts[y+1] do
-   local sprite=sprts[y+1][x+1]
+ local col,row=0,0
+ while row<#sprts do
+  while col<#sprts[row+1] do
+   local sprite=sprts[row+1][col+1]
    if sprite!=0 then
-    local flip=sprite<0
+    local flip_h=sprite<0
     spr(
      abs(sprite),
-     x*8+offset.x,
-     y*8+offset.y,
+     col*8+offset.x,
+     row*8+offset.y,
      1,1,
-     flip)
+     flip_h
+    )
    end
-   x+=1
+   col+=1
   end
-  y+=1
-  x=0
+  row+=1
+  col=0
  end
  
- return {x=x*8+offset.x,y=y*8+offset.y}
+ return {
+  x=col*8+offset.x,
+  y=row*8+offset.y,
+ }
 end
 
 function create_pub(x,y)
@@ -248,16 +334,36 @@ function create_pub(x,y)
 	 {88,89,90,91,92,93,-88},
 	 {104,105,106,106,106,-105,-104}
 	}
- return {
+	local instance={
 	 x=x,
 	 y=y,
-  _draw=function()
-   local offset={x=x,y=y}
-   offset=draw(roof,offset)
-   offset=draw(windows,offset)
-   offset=draw(pub,offset)
-  end,
+	 z=0,
+	 width=7*8,
+	 height=13*8,
+	 elevation=128,
  }
+
+ instance._draw=function()
+  local offset={x=instance.x,y=instance.y}
+  offset=draw(roof,offset)
+  offset=draw(windows,offset)
+  offset=draw(pub,offset)
+  return offset
+ end
+
+ instance._collision=function(x,y,z)
+  return collision(
+   x,y,z,
+   instance.x-128,
+   instance.x+128,
+   instance.y,
+   instance.y+instance.height-4,
+   0,
+   -128
+  )
+ end
+ 
+ return instance
 end
 -->8
 -- leash info --
@@ -467,6 +573,99 @@ function create_leash(dog_x,dog_y,dog_z)
 
  return leash
 end
+-->8
+-- collisions --
+
+-- returns a table with the
+-- {x,y,z} diffs needed to
+-- correct the position of the
+-- point defined by x,y,z in
+-- order to stop its collision
+-- with the 3d prism defined by
+-- the other parameters, or nil
+-- if there is no collision.
+--
+-- the correction table, when
+-- present, will only have the
+-- value of one of the three
+-- dimensions; whichever one
+-- can be corrected with the
+-- smallest movement (the other
+-- dimensions will simply have
+-- a zero as a diff value).
+function collision(
+ x,y,z,
+ obs_x,obs_x2,
+ obs_y,obs_y2,
+ obs_z,obs_z2
+)
+ local fix={}
+
+ -- correct the x, pushing the
+ -- point to the left when
+ -- needed.
+ x=flr(x)
+ if x>=obs_x and x<=obs_x2 then
+  fix[1]=obs_x-x-1
+ else
+  -- no collision found
+  return nil
+ end
+
+ -- correct the y, pushing the
+ -- point up or down (whichever
+ -- way the y move is shorter).
+ y=flr(y)
+ if y>=obs_y and y<=obs_y2 then
+  if abs(y-obs_y)<abs(y-obs_y2) then
+   -- push up
+   fix[2]=obs_y-y-1
+  else
+   -- push down
+   fix[2]=obs_y2-y+1
+  end
+ else
+  -- no collision found
+  return nil
+ end
+
+ -- correct the z, pushing the
+ -- point upwards in the air
+ -- when needed.
+ z=flr(z)
+ if z<=obs_z and z>=obs_z2 then
+  fix[3]=obs_z2-z-1
+ else
+  -- no collision found
+  return nil
+ end
+ 
+ -- choose the x correction if
+ -- it has the shortest path
+ if abs(fix[1])<abs(fix[2])
+ and abs(fix[1])<abs(fix[3])
+ then
+  fix[2],fix[3]=0,0
+ end
+
+ -- choose the y correction if
+ -- it has the shortest path
+ if abs(fix[2])<abs(fix[1])
+ and abs(fix[2])<abs(fix[3])
+ then
+  fix[1],fix[3]=0,0
+ end
+ 
+ -- choose the z correction if
+ -- it has the shortest path
+ if abs(fix[3])<abs(fix[1])
+ and abs(fix[3])<abs(fix[2])
+ then
+  fix[1],fix[2]=0,0
+ end
+
+ return fix
+end
 __gfx__
 00000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa000000000000000000000000000000000000000000000000000000000000000000000000
 00000000aaaaaaaaaaaaaaaaaaaaa0aaaaaaa0aaaaaaaaaaaaaaaaaa000000000000000000000000000000000000000000000000000000000000000000000000
@@ -522,9 +721,9 @@ aa1dd11dd11dd11dd11dd11dd11d111d550066654444460110601106444444445500655560000000
 00000000aa1dd11dd11dd11dd110011d550066645444444444444444444444445506555556666666666666660000000000000000000000000000000000000000
 00000000aa111dd11dd11dd11056650150506555454444444444444444444444aaa5555555555555555555550000000000000000000000000000000000000000
 00000000aa1dd11dd11dd1105666666555006666544444444444444444444444aaaaaaaaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000
-00000000aa111dd11dd110566665566650506666654545454545454545454545aaaaaaaaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000
-00000000aa1dd11dd11056666555555655006666645454545454545454545454aaaaaaaaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000
-aa111dd11dd11dd11056666554544545505066666555555555555555555555555555555500000000000000000000000000000000000000000000000000000000
+00000000aa111dd11dd110566665566650506666454545454545454545454545aaaaaaaaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000
+00000000aa1dd11dd11056666555555655006666545454545454545454545454aaaaaaaaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000
+aa111dd11dd11dd11056666554544545505066665555555555555555555555555555555500000000000000000000000000000000000000000000000000000000
 aa1dd11dd11dd1105666655454444445550666666666666666666666666666666666666600000000000000000000000000000000000000000000000000000000
 aa111dd11dd110566665545445466454505555555555555555555555555555555555555500000000000000000000000000000000000000000000000000000000
 aa1dd11dd11056666554544544600644550888888888888888888888888888888888888800000000000000000000000000000000000000000000000000000000

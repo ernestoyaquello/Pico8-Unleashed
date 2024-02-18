@@ -3,10 +3,11 @@ version 41
 __lua__
 function _init()
  state="play"
- scroll_speed=1.3
+ scroll_speed=1.2
  dog_offset_x=56
  dog=create_dog(dog_offset_x,120)
  buildings={}
+ cars={}
 end
 
 function _update60()
@@ -22,10 +23,18 @@ function _update60()
  if end_x>=map_end_x then
   local offset=-map_end_x+127
   dog.x+=offset
+  
+  -- shift buildings
   for _,b in ipairs(buildings) do
    b.x+=offset
   end
   
+  -- shift cars
+  for _,c in ipairs(cars) do
+   c.x+=offset
+  end
+  
+  -- shift dog
   start_x=dog.x-dog_offset_x
   end_x=dog.x-dog_offset_x+127
  end 
@@ -58,6 +67,60 @@ function _update60()
  end
  
  buildings=new_buildings
+ 
+ -- create new car list
+ local new_cars={}
+ local new_car_ys={
+  [18]=1.8,
+  [40]=1.6,
+  [116]=-1,
+  [132]=-1.2,
+ }
+ 
+ -- add existing cars, but
+ -- only if they are still
+ -- within view
+ for i=1,#cars do
+  local c=cars[i]
+  local c_end_x=c.x+c.width-1
+  if c.x<=end_x and c_end_x>=start_x then
+   new_cars[#new_cars+1]=c
+   if
+   (c.speed<0
+    and c_end_x+c.width>=end_x)
+   or
+   (c.speed>0
+    and c.x-c.width<=start_x)
+   then
+    -- this "y" isn't available
+    -- for new cars, as a car
+    -- is already on it
+    new_car_ys[c.y]=nil
+   end
+  end
+ end
+ 
+ -- add new cars at random
+ for cy,spd in pairs(new_car_ys) do
+  if flr(rnd(50))==1 then
+   local nc_x=end_x
+   if spd>0 then
+    nc_x=start_x-24
+   end
+   local nc=create_car(
+    nc_x,
+    cy,
+    spd
+   )
+   new_cars[#new_cars+1]=nc
+  end
+ end
+ 
+ cars=new_cars
+ 
+ for _,c in ipairs(cars) do
+  c._update()
+ end
 
  dog._update()
 end
@@ -70,9 +133,30 @@ function _draw()
  -- draw the different elements
  camera(dog.x-dog_offset_x, 12) 
  map()
+ 
+ -- draw top cars
+ for _,c in ipairs(cars) do
+  if c.speed>0 then
+   c._draw()
+  end
+ end
+ 
+ -- draw buildings
  for _,b in ipairs(buildings) do
    b._draw()
  end
+ 
+ -- todo: draw dog behind cars
+ -- when needed
+ 
+ -- draw bottom cars
+ for _,c in ipairs(cars) do
+  if c.speed<0 then
+   c._draw()
+  end
+ end
+ 
+ -- draw dog
 	dog._draw()
 end
 -->8
@@ -90,6 +174,7 @@ local dog={
  x=nil,
  y=nil,
  z=nil,
+ floor_z=nil,
  dx=nil,
  dy=nil,
  dz=nil,
@@ -106,6 +191,8 @@ local function spr_duration()
 end
 
 function dog._update()
+ local btn_click=btn(❎) or btn(🅾️)
+
  -- apply gravity to jump,
  -- unless the jump button is
  -- clicked and the dog is
@@ -115,9 +202,9 @@ function dog._update()
  -- click longer for a higher
  -- jump.
  local current_dz=dog.dz
- if dog.z<0 then
-  if not (btn(❎) or btn(🅾️))
-  or dog.z<-13 -- too high
+ if dog.z<dog.floor_z then
+  if not btn_click
+  or dog.floor_z-dog.z>13 -- too high
   or dog.dz>=-1.5 -- too slow
   then
    dog.dz+=gravity
@@ -142,21 +229,14 @@ function dog._update()
 	dog.z+=dog.dz
 	
 	-- dog doesn't enter the floor
-	if dog.z>0 then
-	 dog.z=0
+	if dog.z>dog.floor_z then
+	 dog.z=dog.floor_z
 	 dog.dz=0
-	end
-	
-	-- dog doesn't go too far down
-	if dog.y>132 then
-	 dog.y=132
-	 dog.dy=0
 	end
  
  -- jump if needed and on floor
- local btn_click=btn(❎) or btn(🅾️)
  if btn_click
- and dog.z==0
+ and dog.z==dog.floor_z
  and jump_done
  then
   dog.dz=-jump_acc
@@ -178,7 +258,10 @@ function dog._update()
 	 dog.dy+=0.35
 	else
 	 dog.dy/=1.6
-	end	
+	 if abs(dog.dy)<0.001 then
+	  dog.dy=0
+	 end
+	end
 	
 	-- limit vertical speed
 	if dog.dy<0 then
@@ -187,49 +270,83 @@ function dog._update()
 	 dog.dy=min(1.4,dog.dy)
 	end
 	
+	-- reduce horizontal acc
+	dog.dx/=1.2
+	if abs(dog.dx)<0.001 then
+	 dog.dx=0
+	end
+	
 	-- avoid collisions
 	local col_pts={
-  {dog.x+6,dog.y+6,dog.z},
-  {dog.x+6,dog.y+8,dog.z},
+  {dog.x+6,dog.y+6,0},
+  {dog.x+6,dog.y+8,0},
  }
  -- check if any of the two dog
  -- points defined above are
  -- overlapping any of the map
  -- elements, and apply the
  -- necessary corrections if so
- for _,b in ipairs(buildings) do
-  for _,cp in ipairs(col_pts) do
-   -- col returns the necessary
-   -- corrections to apply to
-   -- the dog when the point we
-   -- are checking is actually
-   -- colliding
-   local col=b._collision(
-	   cp[1],cp[2],cp[3]
-	  )
-	  if col!=nil then
-	   -- correct dog position to
-	   -- stop the collision
-	   dog.x+=col[1]
-	   dog.y+=col[2]
-	   dog.z+=col[3]
-	   
-	   -- correct the table with
-	   -- the collision points
-	   -- for the next iteration
-	   col_pts[1]={
-	    dog.x+6,dog.y+6,dog.z
-	   }
-	   col_pts[2]={
-	    dog.x+6,dog.y+8,dog.z
-	   }
+ dog.floor_z=0
+ for _,c in ipairs(cars) do
+  if c.speed<0 then
+	  for _,cp in ipairs(col_pts) do
+	   -- col returns the necessary
+	   -- corrections to apply to
+	   -- the dog when the point we
+	   -- are checking is actually
+	   -- colliding, if any
+	   local col=c._collision(
+		   cp[1],cp[2],cp[3]
+		  )
+		  if col!=nil then
+		   if col[3]!=0
+		   and (dog.z!=0 or dog.dz!=0)
+		   then
+		    -- dog is above the car
+		    -- or even on top of it,
+		    -- meaning that the car
+		    -- roof is now the floor
+		    -- for the dog
+		    dog.floor_z=col[3]
+
+		    if dog.z>=col[3] then
+		     -- make sure that the
+		     -- dog isn't inside the
+		     -- car but on top of it
+		     -- and moving with it
+		     dog.z=col[3]
+		     dog.dx=c.speed
+		    end
+		   else
+		    -- crashed with car
+		    dog.dx=-8
+		    c.dx=3
+		   end
+
+		   -- correct the table with
+		   -- the collision points
+		   -- for the next iteration
+		   col_pts[1]={
+		    dog.x+6,dog.y+6,0
+		   }
+		   col_pts[2]={
+		    dog.x+6,dog.y+8,0
+		   }
+		  end
 	  end
   end
  end
  
- -- todo: stop the dog from
- -- getting out of bounds
+ -- dog is within bounds
+	if dog.y>132 then
+	 dog.y=132
+	 dog.dy=0
+	elseif dog.y<104 then
+	 dog.y=104
+	 dog.dy=0
+	end
 	
+	-- todo: crashing animation?
 	-- update the dog sprite
 	if current_dz==0 then
 	 -- not jumping: running sprite
@@ -267,15 +384,16 @@ function dog._draw()
 
  -- draw dog shadow
  local shadow=5
- -- todo: update this
  if dog.y<113 and dog.y>40 then
   shadow=0
+ elseif dog.floor_z!=0 then
+  shadow=1
  end
  ovalfill(
   dog.x+1,
-  dog.y+6,
+  dog.y+dog.floor_z+6,
   dog.x+6,
-  dog.y+8,
+  dog.y+dog.floor_z+8,
   shadow
  )
 
@@ -293,6 +411,7 @@ function create_dog(x,y)
 	dog.x=x
 	dog.y=y
 	dog.z=0
+	dog.floor_z=0
 	dog.dx=0
 	dog.dy=0
 	dog.dz=0
@@ -305,47 +424,15 @@ end
 -->8
 -- building info --
 
-local function draw(sprts,offset)
- -- draw element
- local colswap=sprts[1].colswap
- if colswap~=nil then
-  for _,col in ipairs(colswap) do
-   pal(col[1],col[2])
-  end
- end
- local col,row=0,0
- while row<#sprts-1 do
-  while col<#sprts[row+2] do
-   local sprite=sprts[row+2][col+1]
-   if sprite!=0 then
-    local flip_h=sprite<0
-    spr(
-     abs(sprite),
-     col*8+offset.x,
-     row*8+offset.y,
-     1,1,
-     flip_h
-    )
-   end
-   col+=1
-  end
-  row+=1
-  col=0
- end
- if colswap~=nil then
-  for _,col in ipairs(colswap) do
-   pal(col[1],col[1])
-  end
- end
- 
- return {
-  x=col*8+offset.x,
-  y=row*8+offset.y,
- }
-end
-
 function create_building(x,y)
-	local roof={
+	local instance={
+	 x=x,
+	 y=y,
+	 width=7*8,
+	 height=13*8,
+ }
+
+ local roof={
 	 {colswap=mil},
 	 {0,65,66,67,-66,-65,0},
 	 {80,81,82,83,-82,-81,-80},
@@ -450,34 +537,13 @@ function create_building(x,y)
 	  ground[i]=new_gr_row
 	 end
 	end
-	
-	local instance={
-	 x=x,
-	 y=y,
-	 z=0,
-	 width=7*8,
-	 height=13*8,
-	 elevation=128,
- }
 
  instance._draw=function()
   local offset={x=instance.x,y=instance.y}
-  offset=draw(roof,offset)
-  offset=draw(facade,offset)
-  offset=draw(ground,offset)
+  offset=draw_sprts(roof,offset)
+  offset=draw_sprts(facade,offset)
+  offset=draw_sprts(ground,offset)
   return offset
- end
-
- instance._collision=function(x,y,z)
-  return collision(
-   x,y,z,
-   instance.x-128,
-   instance.x+128,
-   instance.y,
-   instance.y+instance.height-5,
-   0,
-   -128
-  )
  end
  
  return instance
@@ -689,7 +755,7 @@ function create_leash(dog_x,dog_y,dog_z)
  return leash
 end
 -->8
--- collisions --
+-- collisions helper --
 
 -- returns a table with the
 -- {x,y,z} diffs needed to
@@ -699,15 +765,6 @@ end
 -- with the 3d prism defined by
 -- the other parameters, or nil
 -- if there is no collision.
---
--- the correction table, when
--- present, will only have the
--- value of one of the three
--- dimensions; whichever one
--- can be corrected with the
--- smallest movement (the other
--- dimensions will simply have
--- a zero as a diff value).
 function collision(
  x,y,z,
  obs_x,obs_x2,
@@ -717,11 +774,18 @@ function collision(
  local fix={}
 
  -- correct the x, pushing the
- -- point to the left when
- -- needed.
+ -- point left or right
+ -- (whichever way the x move
+ -- is shorter).
  x=flr(x)
  if x>=obs_x and x<=obs_x2 then
-  fix[1]=obs_x-x-1
+  if abs(x-obs_x)<abs(x-obs_x2) then
+   -- push left
+   fix[1]=obs_x-x-1
+  else
+   -- push right
+   fix[1]=obs_x2-x+1
+  end
  else
   -- no collision found
   return nil
@@ -757,29 +821,151 @@ function collision(
  
  -- choose the x correction if
  -- it has the shortest path
- if abs(fix[1])<abs(fix[2])
- and abs(fix[1])<abs(fix[3])
- then
-  fix[2],fix[3]=0,0
- end
+ --if abs(fix[1])<abs(fix[2])
+ --and abs(fix[1])<abs(fix[3])
+ --then
+ -- fix[2],fix[3]=0,0
+ --end
 
  -- choose the y correction if
  -- it has the shortest path
- if abs(fix[2])<abs(fix[1])
- and abs(fix[2])<abs(fix[3])
- then
-  fix[1],fix[3]=0,0
- end
+ --if abs(fix[2])<abs(fix[1])
+ --and abs(fix[2])<abs(fix[3])
+ --then
+ -- fix[1],fix[3]=0,0
+ --end
  
  -- choose the z correction if
  -- it has the shortest path
- if abs(fix[3])<abs(fix[1])
- and abs(fix[3])<abs(fix[2])
- then
-  fix[1],fix[2]=0,0
- end
+ --if abs(fix[3])<abs(fix[1])
+ --and abs(fix[3])<abs(fix[2])
+ --then
+ -- fix[1],fix[2]=0,0
+ --end
 
  return fix
+end
+-->8
+-- car info --
+
+-- todo: moving wheels
+
+local function update(inst)
+ inst.dx/=1.3
+ if inst.dx<0.001 then
+	 inst.dx=0
+	end
+ inst.x+=inst.speed+inst.dx
+end
+
+function create_car(x,y,speed)
+ -- todo: random color swap
+	local car={
+	 {colswap=mil},
+	 {11,12,13,14},
+	 {27,28,29,30},
+	}
+	
+	local instance={
+	 x=x,
+	 y=y,
+	 y_rnd=flr(rnd(6))-2.5,
+	 z=0,
+	 speed=speed,
+	 dx=0,
+	 width=4*8,
+	 height=2*8,
+ }
+ 
+ instance._update=function()
+  update(instance)
+ end
+
+ instance._draw=function()
+  local offset={x=instance.x,y=instance.y+instance.y_rnd}
+  offset=draw_sprts(car,offset)
+  return offset
+ end
+
+ instance._collision=function(x,y,z)
+  local col=collision(
+   x,y,z,
+   instance.x,
+   instance.x+11,
+   instance.y+instance.y_rnd+5,
+   instance.y+instance.y_rnd+instance.height,
+   0,
+   -3
+  )
+
+  if col==nil then
+   col=collision(
+	   x,y,z,
+	   instance.x+12,
+	   instance.x+24,
+	   instance.y+instance.y_rnd+5,
+	   instance.y+instance.y_rnd+instance.height,
+	   0,
+	   -6
+	  )
+  end
+  
+  if col==nil then
+   col=collision(
+	   x,y,z,
+	   instance.x+25,
+	   instance.x+instance.width,
+	   instance.y+instance.y_rnd+5,
+	   instance.y+instance.y_rnd+instance.height,
+	   0,
+	   -3
+	  )
+  end
+  
+  return col
+ end
+ 
+ return instance
+end
+-->8
+-- drawing helper --
+
+function draw_sprts(sprts,offset)
+ local colswap=sprts[1].colswap
+ if colswap~=nil then
+  for _,col in ipairs(colswap) do
+   pal(col[1],col[2])
+  end
+ end
+ local col,row=0,0
+ while row<#sprts-1 do
+  while col<#sprts[row+2] do
+   local sprite=sprts[row+2][col+1]
+   if sprite!=0 then
+    local flip_h=sprite<0
+    spr(
+     abs(sprite),
+     col*8+offset.x,
+     row*8+offset.y,
+     1,1,
+     flip_h
+    )
+   end
+   col+=1
+  end
+  row+=1
+  col=0
+ end
+ if colswap~=nil then
+  for _,col in ipairs(colswap) do
+   pal(col[1],col[1])
+  end
+ end
+ 
+ return {
+  x=col*8+offset.x,
+  y=row*8+offset.y,
+ }
 end
 __gfx__
 00000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa9aaaa267daaaa267daaaddaaddaaaaaaaaaaaaabbbbbbbbbbbaaaaaaaaa00000000

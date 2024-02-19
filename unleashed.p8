@@ -6,9 +6,9 @@ function _init()
  scroll_speed=1.2
  gravity=0.35
  jump_acc=2.4
- human_offset_x=4
+ human_offset_x=6
  human=create_human(human_offset_x,120)
- dog_offset_x=56
+ dog_offset_x=58
  dog=create_dog(dog_offset_x,120)
  buildings={}
  cars={}
@@ -83,7 +83,7 @@ function _update60()
   [18]=1.8,
   [40]=1.6,
   [116]=-1,
-  [132]=-1.2,
+  [130]=-1.18,
  }
  
  -- add existing cars, but
@@ -131,8 +131,8 @@ function _update60()
   c._update()
  end
 
- dog._update()
  human._update()
+ dog._update()
 end
 
 function _draw()
@@ -141,13 +141,19 @@ function _draw()
  palt(10, true)
  
  -- draw the different elements
- camera(human.x-human_offset_x, 12) 
+ camera(
+  human.x-human_offset_x,
+  12
+ ) 
  map()
  
  -- draw top cars
+ local bottom_cars={}
  for _,c in ipairs(cars) do
   if c.speed>0 then
    c._draw()
+  else
+   bottom_cars[#bottom_cars+1]=c
   end
  end
  
@@ -156,19 +162,26 @@ function _draw()
    b._draw()
  end
  
- -- todo: draw dog behind cars
- -- when needed
- 
- -- draw bottom cars
- for _,c in ipairs(cars) do
-  if c.speed<0 then
+ -- draw bottom cars behind dog
+ local foregr_cars={}
+ for _,c in ipairs(bottom_cars) do
+  if dog.y+6>c.y+c.y_rnd+5 then
    c._draw()
+  else
+   foregr_cars[#foregr_cars+1]=c
   end
  end
  
  -- draw dog and human
  dog._draw()
  human._draw()
+ 
+ -- draw bottom cars that are
+ -- on the foreground (i.e.,
+ -- in front of the dog)
+ for _,c in ipairs(foregr_cars) do
+  c._draw()
+ end
 end
 -->8
 -- dog info --
@@ -201,22 +214,11 @@ end
 function dog._update()
  local btn_click=btn(❎) or btn(🅾️)
  local last_dog_x=dog.x
+ local last_dog_dx=dog.dx
  
  -- apply velocity deltas
- if dog.dx!=0 and dog.dy!=0 then
-  -- ensure diagonal movements
-  -- aren't faster than non
-  -- diagonal ones
-  local acc=abs(dog.dx)+abs(dog.dy)
-  local acc_v=sqrt(dog.dx*dog.dx+dog.dy*dog.dy)
-  local reduction=acc_v/acc
-  dog.x+=dog.dx*reduction
-  dog.y+=dog.dy*reduction
- else
-  dog.x+=dog.dx 
-  dog.y+=dog.dy
- end
- dog.x+=scroll_speed
+ dog.x+=dog.dx+scroll_speed
+ dog.y+=dog.dy
  dog.z+=dog.dz
  
  -- apply gravity to jump,
@@ -238,15 +240,7 @@ function dog._update()
  end
  
  -- stabilise horizontal speed
- local human_dist=dog_offset_x-human_offset_x
- local human_close=(dog.x-human.x)<human_dist
- if human_close and dog.dx>=0 then
-  -- ensure dog catches up
-  -- very slowly after losing
-  -- distance with human
-  dog.dx+=0.01
-  dog.dx=min(0.08,dog.dx)
- elseif dog.dx<0 then
+ if dog.dx<0 then
   -- ensure dog recovers from
   -- being pushed backwards
   dog.dx+=0.25
@@ -265,18 +259,18 @@ function dog._update()
  
  -- jump if needed and on floor
  if btn_click
- and dog.z==dog.floor_z
- and dog.dx>=-0.2
+ and abs(dog.z-dog.floor_z)<1
+ and abs(dog.dz)<0.1
+ and scroll_speed+dog.dx>0
  and jump_done
  then
   dog.dz=-jump_acc
   jump_done=false
- else
-  -- jump functionality
-  -- available again after jump
-  -- button is released
-  jump_done=jump_done or not btn_click
  end
+ -- jump functionality
+ -- available again after jump
+ -- button is released
+ jump_done=jump_done or not btn_click
  
  -- move up and down if needed,
  -- using acceleration and
@@ -301,9 +295,7 @@ function dog._update()
  end
  
  -- detect collisions
- local col_pts={
-  {dog.x+6,dog.y+7,0},
- }
+ local cp={dog.x+6,dog.y+7,0}
  -- check if any of the two dog
  -- points defined above are
  -- overlapping any of the map
@@ -312,58 +304,53 @@ function dog._update()
  dog.floor_z=0
  for _,c in ipairs(cars) do
   if c.speed<0 then
-   for _,cp in ipairs(col_pts) do
-    -- col returns the necessary
-    -- corrections to apply to
-    -- the dog when the point we
-    -- are checking is actually
-    -- colliding, if any
-    local col=c._collision(
-     cp[1],cp[2],cp[3]
-    )
-    if col!=nil then
-     if col[3]!=0
-     and (dog.z!=0 or dog.dz!=0)
-     then
-      -- dog is above the car
-      -- or even on top of it,
-      -- meaning that the car
-      -- roof is now the floor
-      -- for the dog
-      dog.floor_z=col[3]
+   -- col returns the necessary
+   -- corrections to apply to
+   -- the dog when the point we
+   -- are checking is actually
+   -- colliding, if any
+   local col=c._collision(
+    cp[1],cp[2],cp[3]
+   )
+   if col!=nil then
+    if col[3]!=0
+    and dog.z<-1
+    then
+     -- dog is above the car
+     -- or even on top of it,
+     -- meaning that the car
+     -- roof is now the floor
+     -- for the dog
+     dog.floor_z=col[3]
 
-      if dog.z>=col[3] then
-       -- make sure that the
-       -- dog isn't inside the
-       -- car but on top of it
-       -- and moving with it
-       dog.z=col[3]
-       dog.dx=c.speed
-      end
-     elseif col[1]<0
-     and last_dog_x<=c.x
-     then
-      -- frontal car crash,
-      -- dog will be pushed
-      -- back
-      dog.dx=-4
-      c.dx=3
-     else
-      -- side car crash,
-      -- dog will be moved
-      -- to avoid getting
-      -- inside the car
-      dog.y+=col[2]
-      dog.dy=0
+     if dog.z>=col[3] then
+      -- the dog is on top of
+      -- the car, so it must
+      -- move along with it
+      dog.z=col[3]
+      dog.dx=c.speed
      end
-
-     -- correct the table with
-     -- the collision points
-     -- for the next iteration
-     col_pts[1]={
-      dog.x+6,dog.y+7,0
-     }
+    elseif col[1]<0
+    and last_dog_x<=c.x
+    then
+     -- frontal car crash,
+     -- dog will be pushed
+     -- back
+     dog.dx=-4
+     c.dx=3
+    else
+     -- side car crash,
+     -- dog will be moved
+     -- to avoid getting
+     -- inside the car
+     dog.y+=col[2]
+     dog.dy=0
     end
+
+    -- correct the collision
+    -- point for the next
+    -- iteration
+    cp={dog.x+6,dog.y+7,0}
    end
   end
  end
@@ -375,6 +362,35 @@ function dog._update()
  elseif dog.y<104 then
   dog.y=104
   dog.dy=0
+ end
+ 
+ -- avoid flickering
+ if last_dog_dx!=0
+ and dog.dx==0
+ then
+  -- now that the dog speed is
+  -- the default one again, we
+  -- make sure the frames when
+  -- the dog moves an extra
+  -- pixel are synced with the
+  -- frames when the human
+  -- moves an extra pixel.
+  -- this way, the dog sprite
+  -- won't flicker even when
+  -- the scroll speed uses
+  -- subpixeling.
+  dog.x=flr(dog.x)
+   +(human.x-flr(human.x))
+ end
+ 
+ -- make the dog run faster
+ -- if the human is too close
+ local hum_def_dist=dog_offset_x-human_offset_x
+ local hum_close=abs(dog.x-human.x)<hum_def_dist
+  or dog.x<human.x
+ if hum_close then
+  dog.dx+=0.02
+  dog.dx=min(0.1,dog.dx)
  end
  
  -- update the dog sprite
@@ -432,7 +448,11 @@ function dog._draw()
 
  -- draw dog sprite
  local dog_y=dog.y+dog.z
- spr(dog.sprite, dog.x, dog_y)
+ spr(
+  dog.sprite,
+  dog.x,
+  dog_y
+ )
  
  -- draw leash in front of dog
  if not leash_behind then

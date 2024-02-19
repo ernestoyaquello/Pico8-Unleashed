@@ -21,8 +21,12 @@ function _update60()
  -- scrolling infinite
  local map_end_x=(128*8)-1
  if end_x>=map_end_x then
+  -- shift dog
   local offset=-map_end_x+127
   dog.x+=offset
+  for _,p in ipairs(dog.leash.leash) do
+   p.x+=offset
+  end
   
   -- shift buildings
   for _,b in ipairs(buildings) do
@@ -34,7 +38,7 @@ function _update60()
    c.x+=offset
   end
   
-  -- shift dog
+  -- shift aux variables
   start_x=dog.x-dog_offset_x
   end_x=dog.x-dog_offset_x+127
  end 
@@ -192,6 +196,7 @@ end
 
 function dog._update()
  local btn_click=btn(❎) or btn(🅾️)
+ local last_dog_x=dog.x
 
  -- apply gravity to jump,
  -- unless the jump button is
@@ -278,8 +283,7 @@ function dog._update()
 	
 	-- avoid collisions
 	local col_pts={
-  {dog.x+6,dog.y+6,0},
-  {dog.x+6,dog.y+8,0},
+  {dog.x+6,dog.y+7,0},
  }
  -- check if any of the two dog
  -- points defined above are
@@ -317,20 +321,28 @@ function dog._update()
 		     dog.z=col[3]
 		     dog.dx=c.speed
 		    end
-		   else
-		    -- crashed with car
+		   elseif col[1]<0
+		   and last_dog_x<=c.x
+		   then
+		    -- frontal car crash,
+		    -- dog will be pushed
+		    -- back
 		    dog.dx=-8
 		    c.dx=3
+		   else
+		    -- side car crash,
+		    -- dog will be moved
+		    -- to avoid getting
+		    -- inside the car
+		    dog.y+=col[2]
+		    dog.dy=0
 		   end
 
 		   -- correct the table with
 		   -- the collision points
 		   -- for the next iteration
 		   col_pts[1]={
-		    dog.x+6,dog.y+6,0
-		   }
-		   col_pts[2]={
-		    dog.x+6,dog.y+8,0
+		    dog.x+6,dog.y+7,0
 		   }
 		  end
 	  end
@@ -346,20 +358,22 @@ function dog._update()
 	 dog.dy=0
 	end
 	
-	-- todo: crashing animation?
 	-- update the dog sprite
 	if current_dz==0 then
 	 -- not jumping: running sprite
 		-- (6 sprites)
 		dog.spr_aux+=1
 		local frames_per_sprite=spr_duration()
-		if frames_per_sprite>0 then
-			if dog.spr_aux>6*frames_per_sprite then
+		local pushback=dog.dx<0 and abs(dog.dx)-0.05>scroll_speed
+		if pushback
+		or frames_per_sprite<=0
+		then
+		 dog.sprite=2 -- sitting down
+		else
+		 if dog.spr_aux>6*frames_per_sprite then
 			 dog.spr_aux=frames_per_sprite
 			end
 			dog.sprite=dog.spr_aux/frames_per_sprite
-		else
-		 dog.sprite=2 -- sitting down
 		end
 	else
 	 -- jumping: take the right
@@ -558,7 +572,6 @@ local leash_length=10
 -- be overriden
 local leash={
  leash=nil,
- last_dog_pos=nil,
 }
 
 -- leash position relative
@@ -623,8 +636,6 @@ function leash._update()
 	 local p=leash.leash[i]
 	 
 	 -- update point position
-	 p.x+=dog.x-leash.last_dog_pos.x
-	 p.y-=dog.y-leash.last_dog_pos.y
 	 p.y+=p.dy
 	 p.z+=p.dz
 	 
@@ -632,6 +643,24 @@ function leash._update()
 	 if p.z>0 then
 	  p.z=0
 	  p.dz=0
+	 end
+	 
+	 -- update x movement deltas
+	 local diff_x=p.x-lp.x
+	 local dist_x=abs(diff_x)
+	 if dist_x>0 then
+	  -- move the point to catch
+	  -- up with its predecessor,
+	  -- which is now too far
+	  if diff_x>0 then
+	   p.x-=dist_x-1
+	   p.dx=-dist_x/1.5
+	  else
+	   p.x-=diff_x+1
+	   p.dx=dist_x/1.5
+	  end
+	 else
+	  p.dx=0
 	 end
 	 
 	 -- update y movement deltas
@@ -696,8 +725,6 @@ function leash._update()
 	
 	-- finally update the leash
 	dog.leash.leash=new_leash
-	
-	leash.last_dog_pos={x=dog.x,y=dog.y}
 end
 
 function leash._draw()
@@ -725,10 +752,6 @@ end
 
 function create_leash(dog_x,dog_y,dog_z)
  leash.leash={}
- leash.last_dog_pos={
-  x=dog_x,
-  y=dog_y,
- }
  
  -- initialise leash points,
  -- starting with the one
@@ -859,13 +882,6 @@ local function update(inst)
 end
 
 function create_car(x,y,speed)
- -- todo: random color swap
-	local car={
-	 {colswap=mil},
-	 {11,12,13,14},
-	 {27,28,29,30},
-	}
-	
 	local instance={
 	 x=x,
 	 y=y,
@@ -876,6 +892,27 @@ function create_car(x,y,speed)
 	 width=4*8,
 	 height=2*8,
  }
+ 
+ local cs=nil
+ local cs_rnd=flr(rnd(7))
+ if cs_rnd==0 then
+  cs={{11,8},{3,2}}
+ elseif cs_rnd==1 then
+  cs={{11,12},{3,13}}
+ elseif cs_rnd==2 then
+  cs={{11,13},{3,5}}
+ elseif cs_rnd==3 then
+  cs={{11,14},{3,2}}
+ elseif cs_rnd==4 then
+  cs={{11,4},{3,5}}
+ elseif cs_rnd==5 then
+  cs={{11,7},{3,6}}
+ end
+	local car={
+	 {colswap=cs},
+	 {11,12,13,14},
+	 {27,28,29,30},
+	}
  
  instance._update=function()
   update(instance)
@@ -893,30 +930,28 @@ function create_car(x,y,speed)
    instance.x,
    instance.x+11,
    instance.y+instance.y_rnd+5,
-   instance.y+instance.y_rnd+instance.height,
+   instance.y+instance.y_rnd+instance.height-1,
    0,
    -3
   )
-
   if col==nil then
    col=collision(
 	   x,y,z,
 	   instance.x+12,
 	   instance.x+24,
 	   instance.y+instance.y_rnd+5,
-	   instance.y+instance.y_rnd+instance.height,
+	   instance.y+instance.y_rnd+instance.height-1,
 	   0,
 	   -6
 	  )
   end
-  
   if col==nil then
    col=collision(
 	   x,y,z,
 	   instance.x+25,
 	   instance.x+instance.width,
 	   instance.y+instance.y_rnd+5,
-	   instance.y+instance.y_rnd+instance.height,
+	   instance.y+instance.y_rnd+instance.height-1,
 	   0,
 	   -3
 	  )
@@ -979,11 +1014,11 @@ __gfx__
 666666665655555556555555666666666666666666666666aaaaaaaaaaaaaaaaaaaaaaaa00000000000000003bbbbb311331111113111111303b3b1000000000
 666666665555565555555655666666666666666666666666aaaaaaaaaaaaaaaaaaaaaaaa00000000000000003bbbbbb331111111131111111333bb3000000000
 666666665555555555555555666666666666666666666666a5555555555555555555555a00000000000000003b3333333333333333333333333338e000000000
-6666666655555555555555555555555566666666666666665aaa5aaa5aaa5aaa5aaa5aa500000000000000006333333333333333333333333333388a00000000
-66666666556555555565555555655555666666666666666655a5a5a5a5a5a5a5a5a5a5a500000000000000007633333311133333333333111333331a00000000
+6666666655555555555555555555555566666666666666665aaa5aaa5aaa5aaa5aaa5aa500000000000000006333333333333333333333333333388500000000
+66666666556555555565555555655555666666666666666655a5a5a5a5a5a5a5a5a5a5a500000000000000007633333311133333333333111333331500000000
 6666666655555565555555555555556566666666666666665a5aaa5aaa5aaa5aaa5aaa5500000000000000005133333155513333333331555133331a00000000
-66666666555555555050505055555555677777777766666655a5a5a5a5a5a5a5a5a5a5a50000000000000000aa1111105550111111111055501111aa00000000
-6666666655555555050505055555555567777777776666665aaa5aaa5aaa5aaa5aaa5aa50000000000000000aaaaaaaa000aaaaaaaaaaa000aaaaaaa00000000
+66666666555555555050505055555555677777777766666655a5a5a5a5a5a5a5a5a5a5a50000000000000000a511111055501111111110555011115a00000000
+6666666655555555050505055555555567777777776666665aaa5aaa5aaa5aaa5aaa5aa50000000000000000aa5555550005555555555500055555aa00000000
 aaaaaaaaaaaaaaaaaaaaa0aaaaaaa0aaaaaaa0aaaaaaaaaa4aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04aaa
 aaaaaaaaaaaaa0aaaaaaa44aaaaaa44a4aaaa44a4aaaa0aa4aaaa0aa4aaaa0aaaaaaa0aaaaaaaaaaaaa44aaaaaa04aaaaaa04aaaaaa04aaaaaa04aaaaaa44aaa
 aaaaa0aaaaaaa44aaaaa80404aaa80404aaa80404aaaa44aa4aaa44a4aaaa44a4aaaa44a4aaaa0aaaa222aaaaaa44aaaaaa44aaaaaa44aaaaaa44aaaaaa22aaa

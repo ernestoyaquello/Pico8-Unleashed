@@ -4,6 +4,10 @@ __lua__
 function _init()
  state="play"
  scroll_speed=1.2
+ gravity=0.35
+ jump_acc=2.4
+ human_offset_x=4
+ human=create_human(human_offset_x,120)
  dog_offset_x=56
  dog=create_dog(dog_offset_x,120)
  buildings={}
@@ -11,8 +15,8 @@ function _init()
 end
 
 function _update60()
- local start_x=dog.x-dog_offset_x
- local end_x=dog.x-dog_offset_x+127
+ local start_x=human.x-human_offset_x
+ local end_x=human.x-human_offset_x+127
  
  -- if we have reached the end
  -- of the map, let's move
@@ -21,12 +25,13 @@ function _update60()
  -- scrolling infinite
  local map_end_x=(128*8)-1
  if end_x>=map_end_x then
-  -- shift dog
+  -- shift dog and human
   local offset=-map_end_x+127
   dog.x+=offset
   for _,p in ipairs(dog.leash.leash) do
    p.x+=offset
   end
+  human.x+=offset
   
   -- shift buildings
   for _,b in ipairs(buildings) do
@@ -39,8 +44,8 @@ function _update60()
   end
   
   -- shift aux variables
-  start_x=dog.x-dog_offset_x
-  end_x=dog.x-dog_offset_x+127
+  start_x=human.x-human_offset_x
+  end_x=human.x-human_offset_x+127
  end 
 
  -- create a new list of
@@ -127,6 +132,7 @@ function _update60()
  end
 
  dog._update()
+ human._update()
 end
 
 function _draw()
@@ -135,7 +141,7 @@ function _draw()
  palt(10, true)
  
  -- draw the different elements
- camera(dog.x-dog_offset_x, 12) 
+ camera(human.x-human_offset_x, 12) 
  map()
  
  -- draw top cars
@@ -160,14 +166,12 @@ function _draw()
   end
  end
  
- -- draw dog
-	dog._draw()
+ -- draw dog and human
+ dog._draw()
+ human._draw()
 end
 -->8
 -- dog info --
-
-local jump_acc=2.4
-local gravity=0.35
 
 local jump_done=true
 
@@ -197,7 +201,24 @@ end
 function dog._update()
  local btn_click=btn(❎) or btn(🅾️)
  local last_dog_x=dog.x
-
+ 
+ -- apply velocity deltas
+ if dog.dx!=0 and dog.dy!=0 then
+  -- ensure diagonal movements
+  -- aren't faster than non
+  -- diagonal ones
+  local acc=abs(dog.dx)+abs(dog.dy)
+  local acc_v=sqrt(dog.dx*dog.dx+dog.dy*dog.dy)
+  local reduction=acc_v/acc
+  dog.x+=dog.dx*reduction
+  dog.y+=dog.dy*reduction
+ else
+  dog.x+=dog.dx 
+  dog.y+=dog.dy
+ end
+ dog.x+=scroll_speed
+ dog.z+=dog.dz
+ 
  -- apply gravity to jump,
  -- unless the jump button is
  -- clicked and the dog is
@@ -216,32 +237,36 @@ function dog._update()
   end
  end
  
- -- apply velocity deltas
- if dog.dx!=0 and dog.dy!=0 then
-  -- ensure diagonal movements
-  -- aren't faster than non
-  -- diagonal ones
-  local acc=abs(dog.dx)+abs(dog.dy)
-  local acc_v=sqrt(dog.dx*dog.dx+dog.dy*dog.dy)
-  local reduction=acc_v/acc
-  dog.x+=dog.dx*reduction
-	 dog.y+=dog.dy*reduction
+ -- stabilise horizontal speed
+ local human_dist=dog_offset_x-human_offset_x
+ local human_close=(dog.x-human.x)<human_dist
+ if human_close and dog.dx>=0 then
+  -- ensure dog catches up
+  -- very slowly after losing
+  -- distance with human
+  dog.dx+=0.01
+  dog.dx=min(0.08,dog.dx)
+ elseif dog.dx<0 then
+  -- ensure dog recovers from
+  -- being pushed backwards
+  dog.dx+=0.25
+  dog.dx=min(0,dog.dx)
  else
-  dog.x+=dog.dx 
-	 dog.y+=dog.dy
+  -- ensure normal dog speed
+  -- when everything is normal
+  dog.dx=0
  end
- dog.x+=scroll_speed
-	dog.z+=dog.dz
-	
-	-- dog doesn't enter the floor
-	if dog.z>dog.floor_z then
-	 dog.z=dog.floor_z
-	 dog.dz=0
-	end
+ 
+ -- dog doesn't enter the floor
+ if dog.z>dog.floor_z then
+  dog.z=dog.floor_z
+  dog.dz=0
+ end
  
  -- jump if needed and on floor
  if btn_click
  and dog.z==dog.floor_z
+ and dog.dx>=-0.2
  and jump_done
  then
   dog.dz=-jump_acc
@@ -258,31 +283,25 @@ function dog._update()
  -- deceleration for better
  -- feeling when moving
  if btn(⬆️) then
-	 dog.dy-=0.35
-	elseif btn(⬇️) then
-	 dog.dy+=0.35
-	else
-	 dog.dy/=1.6
-	 if abs(dog.dy)<0.001 then
-	  dog.dy=0
-	 end
-	end
-	
-	-- limit vertical speed
-	if dog.dy<0 then
-	 dog.dy=max(-1.4,dog.dy)
-	elseif dog.dy>0 then
-	 dog.dy=min(1.4,dog.dy)
-	end
-	
-	-- reduce horizontal acc
-	dog.dx/=1.2
-	if abs(dog.dx)<0.001 then
-	 dog.dx=0
-	end
-	
-	-- avoid collisions
-	local col_pts={
+  dog.dy-=0.35
+ elseif btn(⬇️) then
+  dog.dy+=0.35
+ else
+  dog.dy/=1.6
+  if abs(dog.dy)<0.001 then
+   dog.dy=0
+  end
+ end
+ 
+ -- limit vertical speed
+ if dog.dy<0 then
+  dog.dy=max(-1.4,dog.dy)
+ elseif dog.dy>0 then
+  dog.dy=min(1.4,dog.dy)
+ end
+ 
+ -- detect collisions
+ local col_pts={
   {dog.x+6,dog.y+7,0},
  }
  -- check if any of the two dog
@@ -293,99 +312,99 @@ function dog._update()
  dog.floor_z=0
  for _,c in ipairs(cars) do
   if c.speed<0 then
-	  for _,cp in ipairs(col_pts) do
-	   -- col returns the necessary
-	   -- corrections to apply to
-	   -- the dog when the point we
-	   -- are checking is actually
-	   -- colliding, if any
-	   local col=c._collision(
-		   cp[1],cp[2],cp[3]
-		  )
-		  if col!=nil then
-		   if col[3]!=0
-		   and (dog.z!=0 or dog.dz!=0)
-		   then
-		    -- dog is above the car
-		    -- or even on top of it,
-		    -- meaning that the car
-		    -- roof is now the floor
-		    -- for the dog
-		    dog.floor_z=col[3]
+   for _,cp in ipairs(col_pts) do
+    -- col returns the necessary
+    -- corrections to apply to
+    -- the dog when the point we
+    -- are checking is actually
+    -- colliding, if any
+    local col=c._collision(
+     cp[1],cp[2],cp[3]
+    )
+    if col!=nil then
+     if col[3]!=0
+     and (dog.z!=0 or dog.dz!=0)
+     then
+      -- dog is above the car
+      -- or even on top of it,
+      -- meaning that the car
+      -- roof is now the floor
+      -- for the dog
+      dog.floor_z=col[3]
 
-		    if dog.z>=col[3] then
-		     -- make sure that the
-		     -- dog isn't inside the
-		     -- car but on top of it
-		     -- and moving with it
-		     dog.z=col[3]
-		     dog.dx=c.speed
-		    end
-		   elseif col[1]<0
-		   and last_dog_x<=c.x
-		   then
-		    -- frontal car crash,
-		    -- dog will be pushed
-		    -- back
-		    dog.dx=-8
-		    c.dx=3
-		   else
-		    -- side car crash,
-		    -- dog will be moved
-		    -- to avoid getting
-		    -- inside the car
-		    dog.y+=col[2]
-		    dog.dy=0
-		   end
+      if dog.z>=col[3] then
+       -- make sure that the
+       -- dog isn't inside the
+       -- car but on top of it
+       -- and moving with it
+       dog.z=col[3]
+       dog.dx=c.speed
+      end
+     elseif col[1]<0
+     and last_dog_x<=c.x
+     then
+      -- frontal car crash,
+      -- dog will be pushed
+      -- back
+      dog.dx=-4
+      c.dx=3
+     else
+      -- side car crash,
+      -- dog will be moved
+      -- to avoid getting
+      -- inside the car
+      dog.y+=col[2]
+      dog.dy=0
+     end
 
-		   -- correct the table with
-		   -- the collision points
-		   -- for the next iteration
-		   col_pts[1]={
-		    dog.x+6,dog.y+7,0
-		   }
-		  end
-	  end
+     -- correct the table with
+     -- the collision points
+     -- for the next iteration
+     col_pts[1]={
+      dog.x+6,dog.y+7,0
+     }
+    end
+   end
   end
  end
  
  -- dog is within bounds
-	if dog.y>132 then
-	 dog.y=132
-	 dog.dy=0
-	elseif dog.y<104 then
-	 dog.y=104
-	 dog.dy=0
-	end
-	
-	-- update the dog sprite
-	if current_dz==0 then
-	 -- not jumping: running sprite
-		-- (6 sprites)
-		dog.spr_aux+=1
-		local frames_per_sprite=spr_duration()
-		local pushback=dog.dx<0 and abs(dog.dx)-0.05>scroll_speed
-		if pushback
-		or frames_per_sprite<=0
-		then
-		 dog.sprite=2 -- sitting down
-		else
-		 if dog.spr_aux>6*frames_per_sprite then
-			 dog.spr_aux=frames_per_sprite
-			end
-			dog.sprite=dog.spr_aux/frames_per_sprite
-		end
-	else
-	 -- jumping: take the right
-	 -- sprite depending on the
-	 -- progress of the jump
-	 -- (10 sprites)
-	 dog.sprite=32+9*((current_dz+jump_acc)/(2*jump_acc))
-	 dog.sprite=max(32,min(41,dog.sprite))
-	end
-	
-	-- update leash
-	dog.leash._update()
+ if dog.y>132 then
+  dog.y=132
+  dog.dy=0
+ elseif dog.y<104 then
+  dog.y=104
+  dog.dy=0
+ end
+ 
+ -- update the dog sprite
+ if current_dz==0 then
+  -- not jumping: running sprite
+  -- (6 sprites)
+  dog.spr_aux+=1
+  local frames_per_sprite=spr_duration()
+  local pushback=dog.dx<0 and abs(dog.dx)-0.05>scroll_speed
+  if pushback
+  or frames_per_sprite<=0
+  then
+   dog.sprite=2 -- sitting down
+  else
+   if dog.spr_aux>6*frames_per_sprite then
+    dog.spr_aux=frames_per_sprite
+   end
+   dog.sprite=dog.spr_aux/frames_per_sprite
+  end
+ else
+  -- jumping: take the right
+  -- sprite depending on the
+  -- progress of the jump
+  -- (10 sprites)
+  dog.sprite=32+9*((current_dz+jump_acc)/(2*jump_acc))
+  dog.sprite=max(32,min(41,dog.sprite))
+ end
+ 
+ -- update leash
+ dog.leash._update()
 end
 
 function dog._draw()
@@ -422,54 +441,54 @@ function dog._draw()
 end
 
 function create_dog(x,y)
-	dog.x=x
-	dog.y=y
-	dog.z=0
-	dog.floor_z=0
-	dog.dx=0
-	dog.dy=0
-	dog.dz=0
-	dog.spr_aux=spr_duration()
-	dog.sprite=1
-	dog.leash=create_leash(x,y,0)
+ dog.x=x
+ dog.y=y
+ dog.z=0
+ dog.floor_z=0
+ dog.dx=0
+ dog.dy=0
+ dog.dz=0
+ dog.spr_aux=spr_duration()
+ dog.sprite=1
+ dog.leash=create_leash(x,y,0)
 
-	return dog
+ return dog
 end
 -->8
 -- building info --
 
 function create_building(x,y)
-	local instance={
-	 x=x,
-	 y=y,
-	 width=7*8,
-	 height=13*8,
+ local instance={
+  x=x,
+  y=y,
+  width=7*8,
+  height=13*8,
  }
 
  local roof={
-	 {colswap=mil},
-	 {0,65,66,67,-66,-65,0},
-	 {80,81,82,83,-82,-81,-80},
-	 {97,82,82,83,-82,-82,-97},
-	 {97,82,82,83,-82,-82,-97},
-	 {97,82,98,99,-98,-82,-97},
-	}
+  {colswap=mil},
+  {0,65,66,67,-66,-65,0},
+  {80,81,82,83,-82,-81,-80},
+  {97,82,82,83,-82,-82,-97},
+  {97,82,82,83,-82,-82,-97},
+  {97,82,98,99,-98,-82,-97},
+ }
 
  -- make chimneys appear
-	local chimney=flr(rnd(3))
-	if chimney==1 then
-	 local off=flr(rnd(2))
-	 local off2=flr(rnd(2))
-	 if(off2==0) off=1
-	 roof[3+off][2+off2]=107
-	 roof[4+off][2+off2]=123
-	elseif chimney==2 then
-	 local off=flr(rnd(2))
-	 local off2=flr(rnd(2))
-	 if(off2==0) off=1
-	 roof[3+off][6-off2]=-107
-	 roof[4+off][6-off2]=-123
-	end
+ local chimney=flr(rnd(3))
+ if chimney==1 then
+  local off=flr(rnd(2))
+  local off2=flr(rnd(2))
+  if(off2==0) off=1
+  roof[3+off][2+off2]=107
+  roof[4+off][2+off2]=123
+ elseif chimney==2 then
+  local off=flr(rnd(2))
+  local off2=flr(rnd(2))
+  if(off2==0) off=1
+  roof[3+off][6-off2]=-107
+  roof[4+off][6-off2]=-123
+ end
 
  -- switch brick color
  local brick_cs=mil
@@ -481,33 +500,33 @@ function create_building(x,y)
   end
  end
 
-	local facade={
-	 {colswap=brick_cs},
-	 {112,113,114,115,-114,-113,-112},
-	 {68,69,70,87,-70,-69,-68},
-	 {84,85,86,87,-86,-85,-84},
-	 {100,101,102,103,-102,-101,-100},
-	}
-	
-	-- replace rose windows
-	local rosew=flr(rnd(2))
-	if rosew==1 then
-	 facade[2][4]=121
-	end
-	
-	local ground={
-	 {colswap=brick_cs},
-	 {64,-78,-79,122,79,78,-64},
+ local facade={
+  {colswap=brick_cs},
+  {112,113,114,115,-114,-113,-112},
+  {68,69,70,87,-70,-69,-68},
+  {84,85,86,87,-86,-85,-84},
+  {100,101,102,103,-102,-101,-100},
+ }
+ 
+ -- replace rose windows
+ local rosew=flr(rnd(2))
+ if rosew==1 then
+  facade[2][4]=121
+ end
+ 
+ local ground={
+  {colswap=brick_cs},
+  {64,-78,-79,122,79,78,-64},
   {71,85,86,87,95,94,-71},
   {71,101,102,96,111,110,-71},
   {124,106,106,106,127,126,-124},
-	}
-	
-	-- use pub as ground floor
-	local pub=flr(rnd(20))==10
-	if pub then
-	 -- switch pub sign bg color
-	 local pub_bg_cs=mil
+ }
+ 
+ -- use pub as ground floor
+ local pub=flr(rnd(20))==10
+ if pub then
+  -- switch pub sign bg color
+  local pub_bg_cs=mil
   local pub_bg_cs_rnd=flr(rnd(3))
   if pub_bg_cs_rnd==0 then
    pub_bg_cs={{8,1}}
@@ -515,42 +534,42 @@ function create_building(x,y)
    pub_bg_cs={{8,2}}
   end
   -- make sure ground is a pub
-	 ground={
-		 {colswap=pub_bg_cs},
-		 {116,117,118,119,120,117,-116},
-		 {72,73,74,75,76,77,-72},
-		 {88,89,90,91,92,93,-88},
-		 {104,105,106,106,106,-105,-104},
-		}
-	end
-	
-	-- use alternative windows
-	local altw=flr(rnd(2))
-	if altw==1 then
-	 facade[4][2]=108
-	 facade[4][3]=109
-	 facade[4][6]=-108
-	 facade[4][5]=-109
-	 facade[5][3]=125
-	 facade[5][5]=-125
-	 if not pub then
-	  ground[3][2]=108
-	  ground[3][3]=109
-	  ground[4][3]=125
-	 end
-	end
-	
-	-- flip ground layout
-	local flipg=flr(rnd(2))
-	if not pub and flipg==1 then
-	 for i=2,#ground do
-	  local new_gr_row={}
-	  for j=#ground[i],1,-1 do
-	   new_gr_row[#new_gr_row+1]=-ground[i][j]
-	  end
-	  ground[i]=new_gr_row
-	 end
-	end
+  ground={
+   {colswap=pub_bg_cs},
+   {116,117,118,119,120,117,-116},
+   {72,73,74,75,76,77,-72},
+   {88,89,90,91,92,93,-88},
+   {104,105,106,106,106,-105,-104},
+  }
+ end
+ 
+ -- use alternative windows
+ local altw=flr(rnd(2))
+ if altw==1 then
+  facade[4][2]=108
+  facade[4][3]=109
+  facade[4][6]=-108
+  facade[4][5]=-109
+  facade[5][3]=125
+  facade[5][5]=-125
+  if not pub then
+   ground[3][2]=108
+   ground[3][3]=109
+   ground[4][3]=125
+  end
+ end
+ 
+ -- flip ground layout
+ local flipg=flr(rnd(2))
+ if not pub and flipg==1 then
+  for i=2,#ground do
+   local new_gr_row={}
+   for j=#ground[i],1,-1 do
+    new_gr_row[#new_gr_row+1]=-ground[i][j]
+   end
+   ground[i]=new_gr_row
+  end
+ end
 
  instance._draw=function()
   local offset={x=instance.x,y=instance.y}
@@ -618,9 +637,9 @@ local function leash_rel_origin()
 end
 
 function leash._update()
-	-- update leash point by point
-	local o=leash_rel_origin()
-	local new_leash={
+ -- update leash point by point
+ local o=leash_rel_origin()
+ local new_leash={
   {
    x=dog.x+o.x,
    y=dog.y,
@@ -629,102 +648,102 @@ function leash._update()
    dz=0,
   },
  }
-	for i=2,#leash.leash do
-	 -- lp = last point
-	 --  p = current point
-	 local lp=new_leash[i-1]
-	 local p=leash.leash[i]
-	 
-	 -- update point position
-	 p.y+=p.dy
-	 p.z+=p.dz
-	 
-	 -- avoid entering the floor
-	 if p.z>0 then
-	  p.z=0
-	  p.dz=0
-	 end
-	 
-	 -- update x movement deltas
-	 local diff_x=p.x-lp.x
-	 local dist_x=abs(diff_x)
-	 if dist_x>0 then
-	  -- move the point to catch
-	  -- up with its predecessor,
-	  -- which is now too far
-	  if diff_x>0 then
-	   p.x-=dist_x-1
-	   p.dx=-dist_x/1.5
-	  else
-	   p.x-=diff_x+1
-	   p.dx=dist_x/1.5
-	  end
-	 else
-	  p.dx=0
-	 end
-	 
-	 -- update y movement deltas
-	 local diff_y=p.y-lp.y
-	 local dist_y=abs(diff_y)
-	 if dist_y>=1 then
-	  -- move the point to catch
-	  -- up with its predecessor,
-	  -- which is now too far
-	  if diff_y>0 then
-	   p.y-=dist_y-1
-	   p.dy=-dist_y/1.5
-	  else
-	   p.y-=diff_y+1
-	   p.dy=dist_y/1.5
-	  end
-	 else
-	  p.dy=0
-	 end
-	 
-	 -- update z movement deltas
-	 local diff_z=p.z-lp.z
-	 local dist_z=abs(diff_z)
-	 if dist_z>1 then
-	  -- move the point to catch
-	  -- up with its predecessor,
-	  -- which is now too far
-	  if diff_z>0 then
-	   p.z-=diff_z-1
-	   p.dz=-dist_z/2
-	  else
-	   p.z-=diff_z+1
-	   p.dz=dist_z/2
-	  end
-	 else
-	  -- apply gravity
-		 if p.z<0 then
-		  p.dz+=gravity
-		 else
-		  p.dz=0
-		 end
-	 end
-	 
-	 -- ensure there aren't gaps
-	 -- between this point and the
-	 -- previous one this one is
-	 -- attached to. these gaps
-	 -- could happen because we
-	 -- calculate the y and z
-	 -- independently above, which
-	 -- could lead to a distance
-	 -- of 2 between the points.
-	 local v_diff=(lp.y+lp.z)-(p.y+p.z)
-	 if v_diff>1 then
-	  p.y+=v_diff-1
-	 elseif v_diff<-1 then
-	  p.y+=v_diff+1
-	 end
-	 
-	 new_leash[#new_leash+1]=p
-	end
-	
-	-- finally update the leash
-	dog.leash.leash=new_leash
+ for i=2,#leash.leash do
+  -- lp = last point
+  --  p = current point
+  local lp=new_leash[i-1]
+  local p=leash.leash[i]
+  
+  -- update point position
+  p.y+=p.dy
+  p.z+=p.dz
+  
+  -- avoid entering the floor
+  if p.z>0 then
+   p.z=0
+   p.dz=0
+  end
+  
+  -- update x movement deltas
+  local diff_x=p.x-lp.x
+  local dist_x=abs(diff_x)
+  if dist_x>0 then
+   -- move the point to catch
+   -- up with its predecessor,
+   -- which is now too far
+   if diff_x>0 then
+    p.x-=dist_x-1
+    p.dx=-dist_x/1.5
+   else
+    p.x-=diff_x+1
+    p.dx=dist_x/1.5
+   end
+  else
+   p.dx=0
+  end
+  
+  -- update y movement deltas
+  local diff_y=p.y-lp.y
+  local dist_y=abs(diff_y)
+  if dist_y>=1 then
+   -- move the point to catch
+   -- up with its predecessor,
+   -- which is now too far
+   if diff_y>0 then
+    p.y-=dist_y-1
+    p.dy=-dist_y/1.5
+   else
+    p.y-=diff_y+1
+    p.dy=dist_y/1.5
+   end
+  else
+   p.dy=0
+  end
+  
+  -- update z movement deltas
+  local diff_z=p.z-lp.z
+  local dist_z=abs(diff_z)
+  if dist_z>1 then
+   -- move the point to catch
+   -- up with its predecessor,
+   -- which is now too far
+   if diff_z>0 then
+    p.z-=diff_z-1
+    p.dz=-dist_z/2
+   else
+    p.z-=diff_z+1
+    p.dz=dist_z/2
+   end
+  else
+   -- apply gravity
+   if p.z<0 then
+    p.dz+=gravity
+   else
+    p.dz=0
+   end
+  end
+  
+  -- ensure there aren't gaps
+  -- between this point and the
+  -- previous one this one is
+  -- attached to. these gaps
+  -- could happen because we
+  -- calculate the y and z
+  -- independently above, which
+  -- could lead to a distance
+  -- of 2 between the points.
+  local v_diff=(lp.y+lp.z)-(p.y+p.z)
+  if v_diff>1 then
+   p.y+=v_diff-1
+  elseif v_diff<-1 then
+   p.y+=v_diff+1
+  end
+  
+  new_leash[#new_leash+1]=p
+ end
+ 
+ -- finally update the leash
+ dog.leash.leash=new_leash
 end
 
 function leash._draw()
@@ -732,21 +751,21 @@ function leash._draw()
   local p=leash.leash[i]
   if i<#leash.leash then
    -- draw leash point
-	 pset(
-	  p.x-8,
-	  p.y+7+p.z,
-	  2
-	 )
-	 else
-	  -- draw leash handle
-	  rectfill(
-	  p.x-9,
-	  p.y+p.z+6,
-	  p.x-8,
-	  p.y+p.z+7,
-	  0
-	 )
-	 end
+  pset(
+   p.x-8,
+   p.y+7+p.z,
+   2
+  )
+  else
+   -- draw leash handle
+   rectfill(
+   p.x-9,
+   p.y+p.z+6,
+   p.x-8,
+   p.y+p.z+7,
+   0
+  )
+  end
  end
 end
 
@@ -875,22 +894,22 @@ end
 
 local function update(inst)
  inst.dx/=1.3
- if inst.dx<0.001 then
-	 inst.dx=0
-	end
+ if abs(inst.dx)<0.001 then
+  inst.dx=0
+ end
  inst.x+=inst.speed+inst.dx
 end
 
 function create_car(x,y,speed)
-	local instance={
-	 x=x,
-	 y=y,
-	 y_rnd=flr(rnd(6))-2.5,
-	 z=0,
-	 speed=speed,
-	 dx=0,
-	 width=4*8,
-	 height=2*8,
+ local instance={
+  x=x,
+  y=y,
+  y_rnd=flr(rnd(6))-2.5,
+  z=0,
+  speed=speed,
+  dx=0,
+  width=4*8,
+  height=2*8,
  }
  
  local cs=nil
@@ -908,11 +927,11 @@ function create_car(x,y,speed)
  elseif cs_rnd==5 then
   cs={{11,7},{3,6}}
  end
-	local car={
-	 {colswap=cs},
-	 {11,12,13,14},
-	 {27,28,29,30},
-	}
+ local car={
+  {colswap=cs},
+  {11,12,13,14},
+  {27,28,29,30},
+ }
  
  instance._update=function()
   update(instance)
@@ -936,25 +955,25 @@ function create_car(x,y,speed)
   )
   if col==nil then
    col=collision(
-	   x,y,z,
-	   instance.x+12,
-	   instance.x+24,
-	   instance.y+instance.y_rnd+5,
-	   instance.y+instance.y_rnd+instance.height-1,
-	   0,
-	   -6
-	  )
+    x,y,z,
+    instance.x+12,
+    instance.x+24,
+    instance.y+instance.y_rnd+5,
+    instance.y+instance.y_rnd+instance.height-1,
+    0,
+    -6
+   )
   end
   if col==nil then
    col=collision(
-	   x,y,z,
-	   instance.x+25,
-	   instance.x+instance.width,
-	   instance.y+instance.y_rnd+5,
-	   instance.y+instance.y_rnd+instance.height-1,
-	   0,
-	   -3
-	  )
+    x,y,z,
+    instance.x+25,
+    instance.x+instance.width,
+    instance.y+instance.y_rnd+5,
+    instance.y+instance.y_rnd+instance.height-1,
+    0,
+    -3
+   )
   end
   
   return col
@@ -1001,6 +1020,62 @@ function draw_sprts(sprts,offset)
   x=col*8+offset.x,
   y=row*8+offset.y,
  }
+end
+-->8
+-- human info --
+
+-- todo: make human bigger
+
+local function spr_duration()
+ if scroll_speed!=0 then
+  return 5/scroll_speed
+ end
+ return -1
+end
+
+local function update(inst)
+ inst.x+=scroll_speed
+ inst.y+=inst.dy
+ inst.dy=(dog.y-inst.y)/20
+ 
+ inst.spr_aux+=1
+ local frames_per_sprite=spr_duration()
+ if frames_per_sprite<=0 then
+  inst.sprite=43
+ else
+  if inst.spr_aux>6*frames_per_sprite then
+   inst.spr_aux=frames_per_sprite
+  end
+  inst.sprite=41+inst.spr_aux/frames_per_sprite
+ end
+end
+
+function create_human(x,y)
+ local instance={
+  x=x,
+  y=y,
+  z=z,
+  dy=0,
+  dz=0,
+  width=8,
+  height=8,
+  spr_aux=spr_duration(),
+  sprite=42,
+ }
+ 
+ instance._update=function()
+  update(instance)
+ end
+
+ instance._draw=function()
+  spr(
+   instance.sprite,
+   instance.x,
+   instance.y
+  )
+ end
+ 
+ return instance
 end
 __gfx__
 00000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa9aaaa267daaaa267daaaddaaddaaaaaaaaaaaaabbbbbbbbbbbaaaaaaaaa00000000

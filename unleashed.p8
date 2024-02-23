@@ -8,9 +8,10 @@ function _init()
  jump_acc=2.4
  human_offset_x=6
  human=create_human(human_offset_x,114)
- dog_offset_x=58
+ dog_offset_x=45
  dog=create_dog(dog_offset_x,114)
  buildings={}
+ bones={}
  cars={}
 end
 
@@ -41,6 +42,11 @@ function _update60()
   -- shift cars
   for _,c in ipairs(cars) do
    c.x+=offset
+  end
+  
+  -- shift bones
+  for _,b in ipairs(bones) do
+   b.x+=offset
   end
   
   -- shift aux variables
@@ -77,13 +83,51 @@ function _update60()
  
  buildings=new_buildings
  
+ -- todo: update buildings?
+ 
+ -- create new bone list
+ local new_bones={}
+ 
+ -- add existing bones, but
+ -- only if they are still
+ -- within view
+ for _,b in ipairs(bones) do
+  if b.x+7>=start_x then
+   new_bones[#new_bones+1]=b
+  end
+ end
+ 
+ -- add bones at random on the
+ -- sidewalk
+ if flr(rnd(200/scroll_speed))==1
+ and #new_bones==0
+ then
+  local bx=end_x+1
+  for _=1,2+flr(rnd(3)) do
+   local nb=create_bone(bx,116,0)
+   new_bones[#new_bones+1]=nb
+   bx+=12
+  end
+ end
+ 
+ -- replace the bones table with
+ -- the new bones
+ bones=new_bones
+ 
+ -- update bones
+ for _,b in ipairs(bones) do
+  b._update()
+ end
+ 
  -- create new car list
  local new_cars={}
  local new_car_ys={
-  [18]=1.8,
-  [40]=1.6,
-  [116]=-1,
-  [130]=-1.18,
+  [18]=1.9,
+  [40]=2.1,
+  -- this speed must be smaller
+  -- than the scroll speed!
+  [116]=-1.18,
+  [130]=-1,
  }
  
  -- add existing cars, but
@@ -112,7 +156,7 @@ function _update60()
  
  -- add new cars at random
  for cy,spd in pairs(new_car_ys) do
-  if flr(rnd(50))==1 then
+  if flr(rnd(40/scroll_speed))==1 then
    local nc_x=end_x
    if spd>0 then
     nc_x=start_x-24
@@ -140,6 +184,7 @@ function _update60()
   new_cars=aux_new_cars
  end
  
+ -- update cars
  for _,c in ipairs(cars) do
   c._update()
  end
@@ -172,13 +217,18 @@ function _draw()
  
  -- draw buildings
  for _,b in ipairs(buildings) do
-   b._draw()
+  b._draw()
+ end
+ 
+ -- draw sidewalk bones
+ for _,b in ipairs(bones) do
+  b._draw()
  end
  
  -- draw bottom cars behind dog
  local foregr_cars={}
  for _,c in ipairs(bottom_cars) do
-  if dog.y+6>c.y+c.y_rnd+5 then
+  if dog.y+6>c.y+c.y_rnd+6 then
    c._draw()
   else
    foregr_cars[#foregr_cars+1]=c
@@ -215,6 +265,7 @@ local dog={
  spr_aux=nil,
  sprite=nil,
  leash=nil,
+ shadow_col=5,
 }
 
 local function spr_duration()
@@ -269,7 +320,7 @@ function dog._update()
  end
  
  -- dog doesn't enter the floor
- if dog.z>dog.floor_z then
+ if dog.z>=dog.floor_z then
   dog.z=dog.floor_z
   dog.dz=0
  end
@@ -313,11 +364,12 @@ function dog._update()
  
  -- detect collisions
  local cp={dog.x+6,dog.y+7,0}
- -- check if any of the two dog
- -- points defined above are
- -- overlapping any of the map
- -- elements, and apply the
- -- necessary corrections if so
+ -- check if the collision
+ -- point defined above is
+ -- overlapping any of the
+ -- cars, and apply the
+ -- necessary corrections or
+ -- actions if so
  dog.floor_z=0
  for _,c in ipairs(cars) do
   if c.speed<0 then
@@ -325,7 +377,7 @@ function dog._update()
    -- corrections to apply to
    -- the dog when the point we
    -- are checking is actually
-   -- colliding, if any
+   -- colliding
    local col=c._collision(
     cp[1],cp[2],cp[3]
    )
@@ -441,6 +493,14 @@ function dog._update()
  
  -- update leash
  dog.leash._update()
+ 
+ -- update shadow color
+ dog.shad_col=5
+ if dog.y<113 and dog.y>40 then
+  dog.shad_col=0
+ elseif dog.floor_z!=0 then
+  dog.shad_col=1
+ end
 end
 
 function dog._draw()
@@ -452,18 +512,12 @@ function dog._draw()
  end
 
  -- draw dog shadow
- local shadow=5
- if dog.y<113 and dog.y>40 then
-  shadow=0
- elseif dog.floor_z!=0 then
-  shadow=1
- end
  ovalfill(
   dog.x+1,
   dog.y+dog.floor_z+6,
   dog.x+6,
   dog.y+dog.floor_z+8,
-  shadow
+  dog.shad_col
  )
 
  -- draw dog sprite
@@ -616,7 +670,11 @@ function create_building(x,y)
  end
 
  instance._draw=function()
-  local offset={x=instance.x,y=instance.y}
+  local offset={
+   x=instance.x,
+   y=instance.y,
+   z=0,
+  }
   offset=draw_sprts(roof,offset)
   offset=draw_sprts(facade,offset)
   offset=draw_sprts(ground,offset)
@@ -937,25 +995,59 @@ end
 -- todo: moving wheels
 
 local function update(inst)
+ -- reduce horizontal acc
  inst.dx/=1.3
  if abs(inst.dx)<0.001 then
   inst.dx=0
  end
+ 
+ -- apply velocity deltas
  inst.x+=inst.speed+inst.dx
+ 
+ -- update bone if needed
+ if inst.bone!=nil then
+  inst.bone.x=inst.x+13
+  inst.bone.y=inst.y+inst.y_rnd+4
+  inst.bone._update()
+ end
 end
 
 function create_car(x,y,speed)
+ -- random y deviation to make
+ -- sure this car doesn't go
+ -- through its lane perfectly,
+ -- that way each car drives
+ -- a little bit differently
+ local y_rnd=flr(rnd(6))-2.5
+ 
+ -- randomly place a bone on
+ -- top of the car
+ local bone=nil
+ if speed<0
+ and flr(rnd(4))<3
+ then
+  bone=create_bone(
+   x+13,
+   y+y_rnd+11,
+   -6
+  )
+ end
+
  local instance={
   x=x,
   y=y,
-  y_rnd=flr(rnd(6))-2.5,
+  y_rnd=y_rnd,
   z=0,
   speed=speed,
   dx=0,
   width=4*8,
   height=2*8,
+  bone=bone,
  }
  
+ -- change the car colors to
+ -- make each car look somewhat
+ -- unique
  local cs=nil
  local cs_rnd=flr(rnd(7))
  if cs_rnd==0 then
@@ -982,8 +1074,18 @@ function create_car(x,y,speed)
  end
 
  instance._draw=function()
-  local offset={x=instance.x,y=instance.y+instance.y_rnd}
+  -- draw car
+  local offset={
+   x=instance.x,
+   y=instance.y+instance.y_rnd,
+   z=0,
+  }
   draw_sprts(car,offset)
+  
+  -- draw bone if needed
+  if instance.bone!=nil then
+   instance.bone._draw()
+  end
  end
 
  instance._collision=function(x,y,z)
@@ -991,7 +1093,7 @@ function create_car(x,y,speed)
    x,y,z,
    instance.x,
    instance.x+11,
-   instance.y+instance.y_rnd+5,
+   instance.y+instance.y_rnd+6,
    instance.y+instance.y_rnd+instance.height-1,
    0,
    -3
@@ -1001,7 +1103,7 @@ function create_car(x,y,speed)
     x,y,z,
     instance.x+12,
     instance.x+24,
-    instance.y+instance.y_rnd+5,
+    instance.y+instance.y_rnd+6,
     instance.y+instance.y_rnd+instance.height-1,
     0,
     -6
@@ -1012,7 +1114,7 @@ function create_car(x,y,speed)
     x,y,z,
     instance.x+25,
     instance.x+instance.width,
-    instance.y+instance.y_rnd+5,
+    instance.y+instance.y_rnd+6,
     instance.y+instance.y_rnd+instance.height-1,
     0,
     -3
@@ -1043,7 +1145,7 @@ function draw_sprts(sprts,offset)
     spr(
      abs(sprite),
      col*8+offset.x,
-     row*8+offset.y,
+     (row*8+offset.y)+offset.z,
      1,1,
      flip_h
     )
@@ -1062,12 +1164,11 @@ function draw_sprts(sprts,offset)
  return {
   x=col*8+offset.x,
   y=row*8+offset.y,
+  z=offset.z,
  }
 end
 -->8
 -- human info --
-
--- todo: make him jump and all
 
 local sprts={
  {{colswap=nil},{42},{58}},
@@ -1080,7 +1181,7 @@ local sprts={
 
 local function spr_duration()
  if scroll_speed!=0 then
-  return 5/scroll_speed
+  return (#sprts-1)/scroll_speed
  end
  return -1
 end
@@ -1089,8 +1190,80 @@ local function update(inst)
  -- apply velocity deltas
  inst.x+=scroll_speed
  inst.y+=inst.dy
+ inst.z+=inst.dz
  inst.dy=(dog.y-inst.y-9)/20
  
+ -- apply gravity
+ inst.dz+=gravity
+ if inst.z>=inst.floor_z then
+  inst.z=inst.floor_z
+  inst.dz=0
+ end
+ 
+ -- detect collisions with cars
+ local cp={inst.x+4,inst.y+16,0}
+ local cp_future={inst.x+25,inst.y+16,0}
+ inst.floor_z=0
+ for _,c in ipairs(cars) do
+  if c.speed<0 then
+   -- check collision with the
+   -- current human position
+   -- to make him climb on top
+   -- of a card if needed
+   local col=c._collision(
+    cp[1],cp[2],cp[3]
+   )
+   if col!=nil and col[3]!=0 then
+    -- human is above the car
+    -- or even on top of it,
+    -- meaning that the car
+    -- roof is now the floor
+    -- for the human
+    inst.floor_z=col[3]
+
+    -- see if the human is
+    -- or should be on top of
+    -- the car, ensuring it is
+    -- if needed
+    if col[3]<=inst.z then
+     inst.z=col[3]
+     if inst.dz>0 then
+      inst.dz=0
+     end
+    end
+   end
+
+   -- check collision with
+   -- a future human position
+   -- to make the human jump
+   -- over an approaching car
+   -- if needed
+   col=c._collision(
+    cp_future[1],
+    cp_future[2],
+    cp_future[3]
+   )
+   if col!=nil
+   and col[3]<0
+   and inst.z==0
+   and inst.dz==0
+   then
+    inst.dz=-jump_acc*1.2
+   end
+  end
+ end
+ 
+ -- update the shadow color,
+ -- which will depend on the
+ -- surface the human is on top
+ -- of
+ inst.shad_col=5
+ if inst.y+8<113 and inst.y+8>40 then
+  inst.shad_col=0
+ elseif inst.floor_z!=0 then
+  inst.shad_col=1
+ end
+
  -- update sprites
  inst.spr_aux+=1
  local frames_per_sprite=spr_duration()
@@ -1108,51 +1281,21 @@ local function update(inst)
 end
 
 local function draw(inst)
- -- draw human shadow
-
- -- 1. first choose the color,
- -- which will depend on the
- -- surface the human is on top
- -- of
- local shadow=5
- if inst.y+8<113 and inst.y+8>40 then
-  shadow=0
- --elseif inst.floor_z!=0 then
- -- shadow=1
- end
-
- -- 2. then the position, which
- -- will depend on the current
- -- sprite being shown for the
- -- human animation
- shad_x_start=1
- shad_x_end=7
- if inst.spr_index==2
- or inst.spr_index==5
- then
-  shad_x_start=2
-  shad_x_end=5
- elseif inst.spr_index==3
- or inst.spr_index==4
- then
-  shad_x_start=3
-  shad_x_end=4
- elseif inst.spr_index==6 then
-  shad_x_start=2
-  shad_x_end=6
- end
- 
- -- 3. finally draw the shadow
+ -- draw shadow
  ovalfill(
-  inst.x+shad_x_start,
-  inst.y+16,
-  inst.x+shad_x_end,
-  inst.y+16,
-  shadow
+  inst.x+2,
+  inst.y+14+inst.floor_z,
+  inst.x+6,
+  inst.y+16+inst.floor_z,
+  inst.shad_col
  )
  
  -- draw human sprites
- local offset={x=inst.x,y=inst.y}
+ local offset={
+  x=inst.x,
+  y=inst.y,
+  z=inst.z,
+ }
  draw_sprts(
   sprts[inst.spr_index],
   offset
@@ -1163,10 +1306,64 @@ function create_human(x,bottom_y)
  local instance={
   x=x,
   y=bottom_y-16,
-  z=z,
+  z=0,
   dy=0,
   dz=0,
+  floor_z=0,
   spr_aux=spr_duration(),
+  spr_index=1,
+  shad_col=5,
+ }
+ 
+ instance._update=function()
+  update(instance)
+ end
+
+ instance._draw=function()
+  draw(instance)
+ end
+ 
+ return instance
+end
+-->8
+-- bone info --
+
+local sprts={
+ {{colswap=nil},{27}},
+ {{colswap=nil},{28}},
+}
+local frames_per_sprite=18
+
+local function update(inst)
+ -- update sprites
+ inst.spr_aux+=1
+ if inst.spr_aux>#sprts*frames_per_sprite then
+  inst.spr_aux=frames_per_sprite
+ end
+ inst.spr_index=flr(inst.spr_aux/frames_per_sprite+0.5)
+end
+
+local function draw(inst)
+ -- todo: add shadow?
+ 
+ local offset={
+  x=inst.x,
+  y=inst.y,
+  z=inst.z,
+ }
+ draw_sprts(
+  sprts[inst.spr_index],
+  offset
+ )
+end
+
+function create_bone(x,bottom_y,z)
+ local instance={
+  x=x,
+  y=bottom_y-7,
+  z=z,
+  dx=0,
+  spr_aux=frames_per_sprite,
   spr_index=1,
  }
  
@@ -1189,14 +1386,14 @@ __gfx__
 00700700a4448044a4448044a444484aa44448aaa4448044a44480446bbbbb3111d3bbbbbbbbbbb31133bb300000000000000000000000000000000000000000
 00000000aa4448aaa44448aaa444aaaa444444aaa44448aaa44448aa3bbbbb3111d3bbbbbbbbbbb3103b3b100000000000000000000000000000000000000000
 00000000aa44aaaaaa4a4aaaa4aaaaaaaaaaaa4a4aaaa4aaaaaa4aaa3bbbbb3111d33333333333331133bb300000000000000000000000000000000000000000
-666666665655555556555555666666666666666666666666aaaaaaaa3bbbbb311331111113111111303b3b10aaaaa9aa00000000000000000000000000000000
-666666665555565555555655666666666666666666666666aaadddaa3bbbbbb331111111131111111333bb30aaaa979a00000000000000000000000000000000
-666666665555555555555555666666666666666666666666aadd6dda3b3333333333333333333333333338e0aaaa977400000000000000000000000000000000
-666666665555555555555555555555556666666666666666a5ddddda63333333333333333333333333333885aaa9700a00000000000000000000000000000000
-666666665565555555655555556555556666666666666666a55d5d5a76333333111333333333331113333315a9970aaa00000000000000000000000000000000
-666666665555556555555555555555656666666666666666a155555a5133333155513333333331555133331a4770aaaa00000000000000000000000000000000
-666666665555555550505050555555556777777777666666aa1111aaa511111055501111111110555011115aa060aaaa00000000000000000000000000000000
-666666665555555505050505555555556777777777666666aaaaaaaaaa5555550005555555555500055555aaaa0aaaaa00000000000000000000000000000000
+666666665655555556555555666666666666666666666666aaaaaaaa3bbbbb311331111113111111303b3b10aaaaa4aaaaaaa9aa000000000000000000000000
+666666665555565555555655666666666666666666666666aaadddaa3bbbbbb331111111131111111333bb30aaaa474aaaaa979a000000000000000000000000
+666666665555555555555555666666666666666666666666aadd6dda3b3333333333333333333333333338e0aaaa4774aaaa9779000000000000000000000000
+666666665555555555555555555555556666666666666666a5ddddda63333333333333333333333333333885aaa4722aaaa97eea000000000000000000000000
+666666665565555555655555556555556666666666666666a55d5d5a76333333111333333333331113333315a4472aaaa997eaaa000000000000000000000000
+666666665555556555555555555555656666666666666666a155555a5133333155513333333331555133331a4772aaaa977eaaaa000000000000000000000000
+666666665555555550505050555555556777777777666666aa1111aaa511111055501111111110555011115aa262aaaaae6eaaaa000000000000000000000000
+666666665555555505050505555555556777777777666666aaaaaaaaaa5555550005555555555500055555aaaa2aaaaaaaeaaaaa000000000000000000000000
 aaaaaaaaaaaaaaaaaaaaa0aaaaaaa0aaaaaaa0aaaaaaaaaa4aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaa0aaaaaaa44aaaaaa44a4aaaa44a4aaaa0aa4aaaa0aa4aaaa0aaaaaaa0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaa0aaaaaaa44aaaaa80404aaa80404aaa80404aaaa44aa4aaa44a4aaaa44a4aaaa44a4aaaa0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

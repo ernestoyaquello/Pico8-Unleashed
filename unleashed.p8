@@ -9,10 +9,13 @@ function _init()
  human_offset_x=6
  human=create_human(human_offset_x,114)
  dog_offset_x=45
- dog=create_dog(dog_offset_x,114)
+ dog=create_dog(dog_offset_x-20,114)
  buildings={}
  bones={}
  cars={}
+ bones_count=0
+ meters_aux=0
+ meters=0
 end
 
 function _update60()
@@ -191,18 +194,31 @@ function _update60()
 
  human._update()
  dog._update()
+ 
+ -- update meters counter
+ meters_aux+=scroll_speed
+ local meter_size=15
+ if meters_aux>=meter_size then
+  meters+=flr(meters_aux/meter_size)
+  meters_aux=meters_aux%meter_size
+ end
+ 
+ -- increase scroll speed with
+ -- each 100 meters
+ scroll_speed=1.2
+  +min(0.5,flr(meters/100)/20)
 end
 
 function _draw()
+ local cam_x=human.x-human_offset_x
+ local cam_y=12
+
  -- yellow for transparencies
  palt(0, false)
  palt(10, true)
  
  -- draw the different elements
- camera(
-  human.x-human_offset_x,
-  12
- ) 
+ camera(cam_x,cam_y) 
  map()
  
  -- draw top cars
@@ -245,6 +261,57 @@ function _draw()
  for _,c in ipairs(foregr_cars) do
   c._draw()
  end
+
+ -- draw scores
+ local m_str=tostr(meters)
+ local bc_str=tostr(bones_count) 
+
+ -- 1. draw meters
+ if #m_str==1 then
+  m_str="  "..m_str
+ elseif #m_str==2 then
+  m_str=" "..m_str
+ end
+ local m_end_x=cam_x+7+4*#m_str
+ rect(
+  cam_x+4,cam_y+3,
+  m_end_x+1,cam_y+11,
+  0
+ )
+ rectfill(
+  cam_x+3,cam_y+2,
+  m_end_x,cam_y+10,
+  2
+ )
+ print(
+  m_str,
+  cam_x+6,
+  cam_y+4,
+  7
+ )
+ 
+ -- 2. draw bones count
+ rect(
+  m_end_x+4,cam_y+3,
+  m_end_x+16+4*#bc_str,cam_y+11,
+  0
+ )
+ rectfill(
+  m_end_x+3,cam_y+2,
+  m_end_x+15+4*#bc_str,cam_y+10,
+  2
+ )
+ spr(
+  29,
+  m_end_x+5,
+  cam_y+2
+ )
+ print(
+  bc_str,
+  m_end_x+14,
+  cam_y+4,
+  15
+ )
 end
 -->8
 -- dog info --
@@ -362,14 +429,8 @@ function dog._update()
   dog.dy=min(1.4,dog.dy)
  end
  
- -- detect collisions
+ -- detect collisions with cars
  local cp={dog.x+6,dog.y+7,0}
- -- check if the collision
- -- point defined above is
- -- overlapping any of the
- -- cars, and apply the
- -- necessary corrections or
- -- actions if so
  dog.floor_z=0
  for _,c in ipairs(cars) do
   if c.speed<0 then
@@ -415,11 +476,34 @@ function dog._update()
      dog.y+=col[2]
      dog.dy=0
     end
-
-    -- correct the collision
-    -- point for the next
-    -- iteration
-    cp={dog.x+6,dog.y+7,0}
+    -- collision found, end
+    -- the loop
+    break
+   end
+  end
+ end
+ 
+ -- detect collisions with
+ -- bones
+ local all_bones={}
+ for _,b in ipairs(bones) do
+  all_bones[#all_bones+1]=b
+ end
+ for _,c in ipairs(cars) do
+  if c.bone!=nil then
+   all_bones[#all_bones+1]=c.bone
+  end
+ end
+ local cp={dog.x+6,dog.y+7,dog.z}
+ for _,b in ipairs(all_bones) do
+  if not b.taken then
+   local col=b._collision(
+    cp[1],cp[2],cp[3]
+   )
+   if col!=nil then
+    b.taken=true
+    bones_count+=1
+    break
    end
   end
  end
@@ -1007,7 +1091,6 @@ local function update(inst)
  -- update bone if needed
  if inst.bone!=nil then
   inst.bone.x=inst.x+13
-  inst.bone.y=inst.y+inst.y_rnd+4
   inst.bone._update()
  end
 end
@@ -1231,6 +1314,10 @@ local function update(inst)
       inst.dz=0
      end
     end
+
+    -- collision found, end
+    -- the loop
+    break
    end
 
    -- check collision with
@@ -1249,6 +1336,10 @@ local function update(inst)
    and inst.dz==0
    then
     inst.dz=-jump_acc*1.2
+    
+    -- collision found, end
+    -- the loop
+    break
    end
   end
  end
@@ -1328,6 +1419,8 @@ end
 -->8
 -- bone info --
 
+-- todo: animate bone capture
+
 local sprts={
  {{colswap=nil},{27}},
  {{colswap=nil},{28}},
@@ -1345,16 +1438,17 @@ end
 
 local function draw(inst)
  -- todo: add shadow?
- 
- local offset={
-  x=inst.x,
-  y=inst.y,
-  z=inst.z,
- }
- draw_sprts(
-  sprts[inst.spr_index],
-  offset
- )
+ if not inst.taken then
+  local offset={
+   x=inst.x,
+   y=inst.y,
+   z=inst.z,
+  }
+  draw_sprts(
+   sprts[inst.spr_index],
+   offset
+  )
+ end
 end
 
 function create_bone(x,bottom_y,z)
@@ -1365,6 +1459,7 @@ function create_bone(x,bottom_y,z)
   dx=0,
   spr_aux=frames_per_sprite,
   spr_index=1,
+  taken=false,
  }
  
  instance._update=function()
@@ -1373,6 +1468,18 @@ function create_bone(x,bottom_y,z)
 
  instance._draw=function()
   draw(instance)
+ end
+ 
+ instance._collision=function(x,y,z)
+  return collision(
+   x,y,z,
+   instance.x-1,
+   instance.x+9,
+   instance.y,
+   instance.y+11,
+   instance.z+1,
+   instance.z-11
+  )
  end
  
  return instance
@@ -1386,14 +1493,14 @@ __gfx__
 00700700a4448044a4448044a444484aa44448aaa4448044a44480446bbbbb3111d3bbbbbbbbbbb31133bb300000000000000000000000000000000000000000
 00000000aa4448aaa44448aaa444aaaa444444aaa44448aaa44448aa3bbbbb3111d3bbbbbbbbbbb3103b3b100000000000000000000000000000000000000000
 00000000aa44aaaaaa4a4aaaa4aaaaaaaaaaaa4a4aaaa4aaaaaa4aaa3bbbbb3111d33333333333331133bb300000000000000000000000000000000000000000
-666666665655555556555555666666666666666666666666aaaaaaaa3bbbbb311331111113111111303b3b10aaaaa4aaaaaaa9aa000000000000000000000000
-666666665555565555555655666666666666666666666666aaadddaa3bbbbbb331111111131111111333bb30aaaa474aaaaa979a000000000000000000000000
-666666665555555555555555666666666666666666666666aadd6dda3b3333333333333333333333333338e0aaaa4774aaaa9779000000000000000000000000
-666666665555555555555555555555556666666666666666a5ddddda63333333333333333333333333333885aaa4722aaaa97eea000000000000000000000000
-666666665565555555655555556555556666666666666666a55d5d5a76333333111333333333331113333315a4472aaaa997eaaa000000000000000000000000
-666666665555556555555555555555656666666666666666a155555a5133333155513333333331555133331a4772aaaa977eaaaa000000000000000000000000
-666666665555555550505050555555556777777777666666aa1111aaa511111055501111111110555011115aa262aaaaae6eaaaa000000000000000000000000
-666666665555555505050505555555556777777777666666aaaaaaaaaa5555550005555555555500055555aaaa2aaaaaaaeaaaaa000000000000000000000000
+666666665655555556555555666666666666666666666666aaaaaaaa3bbbbb311331111113111111303b3b10aaaaa4aaaaaaa9aaaaaaaaaa0000000000000000
+666666665555565555555655666666666666666666666666aaadddaa3bbbbbb331111111131111111333bb30aaaa474aaaaa979aaaaaaaaa0000000000000000
+666666665555555555555555666666666666666666666666aadd6dda3b3333333333333333333333333338e0aaaa4774aaaa9779aaaafaaa0000000000000000
+666666665555555555555555555555556666666666666666a5ddddda63333333333333333333333333333885aaa4722aaaa97eeaaaaaffaa0000000000000000
+666666665565555555655555556555556666666666666666a55d5d5a76333333111333333333331113333315a4472aaaa997eaaaaaafaaaa0000000000000000
+666666665555556555555555555555656666666666666666a155555a5133333155513333333331555133331a4772aaaa977eaaaaaffaaaaa0000000000000000
+666666665555555550505050555555556777777777666666aa1111aaa511111055501111111110555011115aa262aaaaae6eaaaaaafaaaaa0000000000000000
+666666665555555505050505555555556777777777666666aaaaaaaaaa5555550005555555555500055555aaaa2aaaaaaaeaaaaaaaaaaaaa0000000000000000
 aaaaaaaaaaaaaaaaaaaaa0aaaaaaa0aaaaaaa0aaaaaaaaaa4aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaa0aaaaaaa44aaaaaa44a4aaaa44a4aaaa0aa4aaaa0aa4aaaa0aaaaaaa0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaa0aaaaaaa44aaaaa80404aaa80404aaa80404aaaa44aa4aaa44a4aaaa44a4aaaa44a4aaaa0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

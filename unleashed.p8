@@ -3,18 +3,20 @@ version 41
 __lua__
 function _init()
  state="play"
- scroll_speed=1.2
+ scroll_speed_deft=1.1
+ scroll_speed=scroll_speed_deft
  gravity=0.35
  jump_acc=2.4
  human_offset_x=6
  human=create_human(human_offset_x,114)
- dog_offset_x=45
- dog=create_dog(dog_offset_x-20,114)
+ dog_offset_x=48
+ dog=create_dog(dog_offset_x,114)
  buildings={}
  bones={}
  cars={}
  bones_count=0
  meters_aux=0
+ real_meters=0
  meters=0
 end
 
@@ -125,12 +127,12 @@ function _update60()
  -- create new car list
  local new_cars={}
  local new_car_ys={
-  [18]=1.9,
-  [40]=2.1,
+  [18]=1.2,
+  [40]=1.3,
   -- this speed must be smaller
   -- than the scroll speed!
-  [116]=-1.18,
-  [130]=-1,
+  [116]=-1.0,
+  [130]=-0.9,
  }
  
  -- add existing cars, but
@@ -141,11 +143,12 @@ function _update60()
   local c_end_x=c.x+c.width-1
   if c.x<=end_x and c_end_x>=start_x then
    new_cars[#new_cars+1]=c
-   if
-   (c.speed<0
-    and c_end_x+c.width>=end_x)
-   or
-   (c.speed>0
+   if (
+    (c.speed<0 
+     or c.speed<scroll_speed)
+    and c_end_x+c.width>=end_x
+   )
+   or (c.speed>scroll_speed
     and c.x-c.width<=start_x)
    then
     -- this "y" isn't available
@@ -159,9 +162,12 @@ function _update60()
  
  -- add new cars at random
  for cy,spd in pairs(new_car_ys) do
-  if flr(rnd(40/scroll_speed))==1 then
+  local factor=abs(spd-scroll_speed)
+  if factor!=0
+  and flr(rnd(60/factor))==0
+  then
    local nc_x=end_x
-   if spd>0 then
+   if spd>scroll_speed then
     nc_x=start_x-24
    end
    local nc=create_car(nc_x,cy,spd)
@@ -193,19 +199,22 @@ function _update60()
  end
 
  human._update()
+ 
+ local last_dog_x=dog.x
  dog._update()
  
  -- update meters counter
- meters_aux+=scroll_speed
+ meters_aux+=dog.x-last_dog_x
  local meter_size=15
- if meters_aux>=meter_size then
-  meters+=flr(meters_aux/meter_size)
+ if abs(meters_aux)>=meter_size then
+  real_meters+=flr(meters_aux/meter_size)
+  meters=max(meters,real_meters)
   meters_aux=meters_aux%meter_size
  end
  
  -- increase scroll speed with
  -- each 100 meters
- scroll_speed=1.2
+ scroll_speed=scroll_speed_deft
   +min(0.5,flr(meters/100)/20)
 end
 
@@ -244,7 +253,9 @@ function _draw()
  -- draw bottom cars behind dog
  local foregr_cars={}
  for _,c in ipairs(bottom_cars) do
-  if dog.y+6>c.y+c.y_rnd+6 then
+  if dog.y+6>c.y+c.y_rnd+6
+  or dog.floor_z<0
+  then
    c._draw()
   else
    foregr_cars[#foregr_cars+1]=c
@@ -348,19 +359,51 @@ end
 
 function dog._update()
  local btn_click=btn(❎) or btn(🅾️)
- local last_dog_x=dog.x
- local last_dog_dx=dog.dx
+ 
+ -- jump functionality
+ -- available again after jump
+ -- button is released
+ jump_done=jump_done or not btn_click
+ 
+ -- jump if needed and able
+ if btn_click
+ and abs(dog.z-dog.floor_z)<1
+ and abs(dog.dz)<0.1
+ and scroll_speed+dog.dx>0
+ and jump_done
+ then
+  dog.dz=-jump_acc
+  jump_done=false
+ end
+
+ -- move up and down,
+ -- using acceleration and
+ -- deceleration for better
+ -- feeling when moving
+ if btn(⬆️) then
+  dog.dy-=0.18
+  dog.dy=max(-1.4,dog.dy)
+ elseif btn(⬇️) then
+  dog.dy+=0.18
+  dog.dy=min(1.4,dog.dy)
+ else
+  dog.dy/=1.6
+  if abs(dog.dy)<0.01 then
+   dog.dy=0
+  end
+ end
  
  -- apply velocity deltas
+ local last_dog_x=dog.x
+ local last_dog_dx=dog.dx
  dog.x+=dog.dx+scroll_speed
  dog.y+=dog.dy
  dog.z+=dog.dz
  
- -- apply gravity to jump,
- -- unless the jump button is
- -- clicked and the dog is
- -- neither too high nor
- -- slowing down the climb.
+ -- apply gravity,unless the
+ -- jump button is clicked and
+ -- the dog is neither too high
+ -- nor slowing down the climb.
  -- this is so the user can
  -- click longer for a higher
  -- jump.
@@ -374,61 +417,36 @@ function dog._update()
   end
  end
  
- -- stabilise horizontal speed
- if dog.dx<0 then
-  -- ensure dog recovers from
-  -- being pushed backwards
-  dog.dx+=0.25
-  dog.dx=min(0,dog.dx)
- else
-  -- ensure normal dog speed
-  -- when everything is normal
-  dog.dx=0
- end
- 
  -- dog doesn't enter the floor
  if dog.z>=dog.floor_z then
   dog.z=dog.floor_z
   dog.dz=0
  end
  
- -- jump if needed and on floor
- if btn_click
- and abs(dog.z-dog.floor_z)<1
- and abs(dog.dz)<0.1
- and scroll_speed+dog.dx>0
- and jump_done
- then
-  dog.dz=-jump_acc
-  jump_done=false
- end
- -- jump functionality
- -- available again after jump
- -- button is released
- jump_done=jump_done or not btn_click
- 
- -- move up and down if needed,
- -- using acceleration and
- -- deceleration for better
- -- feeling when moving
- if btn(⬆️) then
-  dog.dy-=0.35
- elseif btn(⬇️) then
-  dog.dy+=0.35
- else
-  dog.dy/=1.6
-  if abs(dog.dy)<0.001 then
-   dog.dy=0
+ -- stabilise horizontal speed
+ -- to ensure the dog recovers
+ -- from being pushed backwards
+ if dog.dx<0 then
+  dog.dx+=0.16*scroll_speed
+  if dog.dx>=0 then
+   dog.dx=0
+   -- make the decimals of the
+   -- dog's x and the human's x
+   -- match to avoid flickering
+   dog.x=flr(dog.x)
+    +(human.x-flr(human.x))
   end
  end
  
- -- limit vertical speed
- if dog.dy<0 then
-  dog.dy=max(-1.4,dog.dy)
- elseif dog.dy>0 then
-  dog.dy=min(1.4,dog.dy)
+ -- dog is within bounds
+ if dog.y>132 then
+  dog.y=132+min(0.49,dog.y-flr(dog.y))
+  dog.dy=0
+ elseif dog.y<104 then
+  dog.y=104+min(0.49,dog.y-flr(dog.y))
+  dog.dy=0
  end
- 
+
  -- detect collisions with cars
  local cp={dog.x+6,dog.y+7,0}
  dog.floor_z=0
@@ -455,10 +473,8 @@ function dog._update()
 
      if dog.z>=col[3] then
       -- the dog is on top of
-      -- the car, so it must
-      -- move along with it
+      -- the car
       dog.z=col[3]
-      dog.dx=c.speed
      end
     elseif col[1]<0
     and last_dog_x<=c.x
@@ -466,9 +482,9 @@ function dog._update()
      -- frontal car crash,
      -- dog will be pushed
      -- back
-     dog.dx=-5
-     c.dx=3
-    else
+     dog.dx=min(-2,4.2*c.speed)
+     c.dx=2.5*scroll_speed
+    elseif col[2]!=0 then
      -- side car crash,
      -- dog will be moved
      -- to avoid getting
@@ -484,66 +500,29 @@ function dog._update()
  end
  
  -- detect collisions with
- -- bones
- local all_bones={}
+ -- bones that aren't taken
+ local nt_bones={}
  for _,b in ipairs(bones) do
-  all_bones[#all_bones+1]=b
+  if not b.taken then
+   nt_bones[#nt_bones+1]=b
+  end
  end
  for _,c in ipairs(cars) do
-  if c.bone!=nil then
-   all_bones[#all_bones+1]=c.bone
+  if c.bone!=nil
+  and not c.bone.taken
+  then
+   nt_bones[#nt_bones+1]=c.bone
   end
  end
- local cp={dog.x+6,dog.y+7,dog.z}
- for _,b in ipairs(all_bones) do
-  if not b.taken then
-   local col=b._collision(
-    cp[1],cp[2],cp[3]
-   )
-   if col!=nil then
-    b.taken=true
-    bones_count+=1
-    break
-   end
+ for _,b in ipairs(nt_bones) do
+  local col=b._collision(
+   cp[1],cp[2],dog.z
+  )
+  if col!=nil then
+   b.taken=true
+   bones_count+=1
+   break
   end
- end
- 
- -- dog is within bounds
- if dog.y>132 then
-  dog.y=132
-  dog.dy=0
- elseif dog.y<104 then
-  dog.y=104
-  dog.dy=0
- end
- 
- -- avoid flickering
- if last_dog_dx!=0
- and dog.dx==0
- then
-  -- now that the dog speed is
-  -- the default one again, we
-  -- make sure the frames when
-  -- the dog moves an extra
-  -- pixel are synced with the
-  -- frames when the human
-  -- moves an extra pixel.
-  -- this way, the dog sprite
-  -- won't flicker even when
-  -- the scroll speed uses
-  -- subpixeling.
-  dog.x=flr(dog.x)
-   +(human.x-flr(human.x))
- end
- 
- -- make the dog run faster
- -- if the human is too close
- local hum_def_dist=dog_offset_x-human_offset_x
- local hum_close=abs(dog.x-human.x)<hum_def_dist
-  or dog.x<human.x
- if hum_close then
-  dog.dx+=0.02
-  dog.dx=min(0.1,dog.dx)
  end
  
  -- update the dog sprite
@@ -552,11 +531,12 @@ function dog._update()
   -- (6 sprites)
   dog.spr_aux+=1
   local frames_per_sprite=spr_duration()
-  local pushback=dog.dx<0 and abs(dog.dx)-0.05>scroll_speed
+  local pushback=last_dog_dx<0
   if pushback
   or frames_per_sprite<=0
   then
    dog.sprite=2 -- sitting down
+   dog.spr_aux=spr_duration()*3
   else
    if dog.spr_aux>6*frames_per_sprite then
     dog.spr_aux=frames_per_sprite
@@ -575,14 +555,18 @@ function dog._update()
   dog.sprite=max(32,min(41,dog.sprite))
  end
  
- -- update leash
+ -- update leash (needs updated
+ -- after the dog sprite
+ -- because it will be
+ -- positioned according to it)
  dog.leash._update()
  
  -- update shadow color
  dog.shad_col=5
  if dog.y<113 and dog.y>40 then
   dog.shad_col=0
- elseif dog.floor_z!=0 then
+ end
+ if dog.floor_z!=0 then
   dog.shad_col=1
  end
 end
@@ -1090,7 +1074,9 @@ local function update(inst)
  
  -- update bone if needed
  if inst.bone!=nil then
-  inst.bone.x=inst.x+13
+  if not inst.bone.taken then
+   inst.bone.x=inst.x+13
+  end
   inst.bone._update()
  end
 end
@@ -1151,6 +1137,10 @@ function create_car(x,y,speed)
   {7,8,9,10},
   {23,24,25,26},
  }
+ if speed>0 then
+  car[2]={-10,-9,-8,-7}
+  car[3]={-26,-25,-24,-23}
+ end
  
  instance._update=function()
   update(instance)
@@ -1177,17 +1167,17 @@ function create_car(x,y,speed)
    instance.x,
    instance.x+11,
    instance.y+instance.y_rnd+6,
-   instance.y+instance.y_rnd+instance.height-1,
+   instance.y+instance.y_rnd+instance.height-2,
    0,
    -3
   )
   if col==nil then
    col=collision(
     x,y,z,
-    instance.x+12,
+    instance.x+11,
     instance.x+24,
     instance.y+instance.y_rnd+6,
-    instance.y+instance.y_rnd+instance.height-1,
+    instance.y+instance.y_rnd+instance.height-2,
     0,
     -6
    )
@@ -1195,10 +1185,10 @@ function create_car(x,y,speed)
   if col==nil then
    col=collision(
     x,y,z,
-    instance.x+25,
+    instance.x+24,
     instance.x+instance.width,
     instance.y+instance.y_rnd+6,
-    instance.y+instance.y_rnd+instance.height-1,
+    instance.y+instance.y_rnd+instance.height-2,
     0,
     -3
    )
@@ -1274,7 +1264,7 @@ local function update(inst)
  inst.x+=scroll_speed
  inst.y+=inst.dy
  inst.z+=inst.dz
- inst.dy=(dog.y-inst.y-9)/20
+ inst.dy=(dog.y-inst.y-8)/8
  
  -- apply gravity
  inst.dz+=gravity
@@ -1283,25 +1273,22 @@ local function update(inst)
   inst.dz=0
  end
  
- -- detect collisions with cars
- local cp={inst.x+4,inst.y+16,0}
- local cp_future={inst.x+25,inst.y+16,0}
+ -- detect if the human is
+ -- currently colliding with a
+ -- car to make sure he is
+ -- moved to be on top of it if
+ -- needed
+ local collided=false
+ local cp={inst.x+4,inst.y+15,0}
  inst.floor_z=0
  for _,c in ipairs(cars) do
   if c.speed<0 then
-   -- check collision with the
-   -- current human position
-   -- to make him climb on top
-   -- of a card if needed
    local col=c._collision(
     cp[1],cp[2],cp[3]
    )
    if col!=nil and col[3]!=0 then
-    -- human is above the car
-    -- or even on top of it,
-    -- meaning that the car
-    -- roof is now the floor
-    -- for the human
+    -- the car roof is now the
+    -- floor for the human
     inst.floor_z=col[3]
 
     -- see if the human is
@@ -1314,32 +1301,41 @@ local function update(inst)
       inst.dz=0
      end
     end
-
     -- collision found, end
     -- the loop
+    collided=true
     break
    end
-
-   -- check collision with
-   -- a future human position
-   -- to make the human jump
-   -- over an approaching car
-   -- if needed
-   col=c._collision(
-    cp_future[1],
-    cp_future[2],
-    cp_future[3]
-   )
-   if col!=nil
-   and col[3]<0
-   and inst.z==0
-   and inst.dz==0
-   then
-    inst.dz=-jump_acc*1.2
-    
-    -- collision found, end
-    -- the loop
-    break
+  end
+ end
+ 
+ -- detect if the human will
+ -- collide with the car soon
+ -- to make him jump if needed
+ if not collided then
+  local cp_future={
+   cp[1]+(18*scroll_speed),
+   cp[2]+(10*inst.dy),
+   0,
+  }
+  for _,c in ipairs(cars) do
+   if c.speed<0 then
+    col=c._collision(
+     cp_future[1],
+     cp_future[2],
+     cp_future[3]
+    )
+    if col!=nil
+    and col[3]<0
+    and inst.z==0
+    and inst.dz==0
+    then
+     -- make the human jump
+     inst.dz=-jump_acc*1.2
+     -- collision found, end
+     -- the loop
+     break
+    end
    end
   end
  end
@@ -1351,7 +1347,8 @@ local function update(inst)
  inst.shad_col=5
  if inst.y+8<113 and inst.y+8>40 then
   inst.shad_col=0
- elseif inst.floor_z!=0 then
+ end
+ if inst.floor_z!=0 then
   inst.shad_col=1
  end
 
@@ -1478,7 +1475,7 @@ function create_bone(x,bottom_y,z)
    instance.y,
    instance.y+11,
    instance.z+1,
-   instance.z-11
+   instance.z-12
   )
  end
  

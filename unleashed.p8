@@ -3,7 +3,7 @@ version 41
 __lua__
 function _init()
  state="play"
- scroll_speed_deft=1.1
+ scroll_speed_deft=1
  scroll_speed=scroll_speed_deft
  gravity=0.35
  jump_acc=2.4
@@ -109,7 +109,7 @@ function _update60()
  then
   local bx=end_x+1
   for _=1,2+flr(rnd(3)) do
-   local nb=create_bone(bx,116,0)
+   local nb=create_bone(bx,117,-3)
    new_bones[#new_bones+1]=nb
    bx+=12
   end
@@ -215,7 +215,7 @@ function _update60()
  -- increase scroll speed with
  -- each 100 meters
  scroll_speed=scroll_speed_deft
-  +min(0.5,flr(meters/100)/20)
+  +min(1,flr(meters/100)/20)
 end
 
 function _draw()
@@ -245,16 +245,21 @@ function _draw()
   b._draw()
  end
  
- -- draw sidewalk bones
+ -- draw sidewalk bones behind
+ -- dog
+ local foregr_bones={}
  for _,b in ipairs(bones) do
-  b._draw()
+  if dog.y+6>b.y+3 then
+   b._draw()
+  else
+   foregr_bones[#foregr_bones+1]=b
+  end
  end
  
  -- draw bottom cars behind dog
  local foregr_cars={}
  for _,c in ipairs(bottom_cars) do
-  if dog.y+6>c.y+c.y_rnd+6
-  or dog.floor_z<0
+  if dog.y+7>c.y+c.y_rnd+6
   then
    c._draw()
   else
@@ -266,9 +271,15 @@ function _draw()
  dog._draw()
  human._draw()
  
- -- draw bottom cars that are
+ -- draw bottom bones that are
  -- on the foreground (i.e.,
  -- in front of the dog)
+ for _,b in ipairs(foregr_bones) do
+  b._draw()
+ end
+ 
+ -- draw bottom cars that are
+ -- on the foreground
  for _,c in ipairs(foregr_cars) do
   c._draw()
  end
@@ -482,7 +493,10 @@ function dog._update()
      -- frontal car crash,
      -- dog will be pushed
      -- back
-     dog.dx=min(-2,4.2*c.speed)
+     dog.dx=min(
+      -2,
+      1.8*(c.speed-scroll_speed)
+     )
      c.dx=2.5*scroll_speed
     elseif col[2]!=0 then
      -- side car crash,
@@ -516,7 +530,7 @@ function dog._update()
  end
  for _,b in ipairs(nt_bones) do
   local col=b._collision(
-   cp[1],cp[2],dog.z
+   cp[1],cp[2],dog.z-2
   )
   if col!=nil then
    b.taken=true
@@ -565,8 +579,7 @@ function dog._update()
  dog.shad_col=5
  if dog.y<113 and dog.y>40 then
   dog.shad_col=0
- end
- if dog.floor_z!=0 then
+ elseif dog.floor_z!=0 then
   dog.shad_col=1
  end
 end
@@ -989,14 +1002,19 @@ function collision(
  -- point left or right
  -- (whichever way the x move
  -- is shorter).
- x=flr(x)
  if x>=obs_x and x<=obs_x2 then
   if abs(x-obs_x)<abs(x-obs_x2) then
    -- push left
-   fix[1]=obs_x-x-1
+   fix[1]=obs_x-x
+   if fix[1]>-0.5 then
+    fix[1]=-0.5
+   end
   else
    -- push right
-   fix[1]=obs_x2-x+1
+   fix[1]=obs_x2-x
+   if fix[1]<0.5 then
+    fix[1]=0.5
+   end
   end
  else
   -- no collision found
@@ -1006,14 +1024,19 @@ function collision(
  -- correct the y, pushing the
  -- point up or down (whichever
  -- way the y move is shorter).
- y=flr(y)
  if y>=obs_y and y<=obs_y2 then
   if abs(y-obs_y)<abs(y-obs_y2) then
    -- push up
-   fix[2]=obs_y-y-1
+   fix[2]=obs_y-y
+   if fix[2]>-0.5 then
+    fix[2]=-0.5
+   end
   else
    -- push down
-   fix[2]=obs_y2-y+1
+   fix[2]=obs_y2-y
+   if fix[2]<0.5 then
+    fix[2]=0.5
+   end
   end
  else
   -- no collision found
@@ -1023,9 +1046,11 @@ function collision(
  -- correct the z, pushing the
  -- point upwards in the air
  -- when needed.
- z=flr(z)
  if z<=obs_z and z>=obs_z2 then
-  fix[3]=obs_z2-z-1
+  fix[3]=obs_z2-z
+  if fix[3]>-0.5 then
+   fix[3]=-0.5
+  end
  else
   -- no collision found
   return nil
@@ -1097,9 +1122,10 @@ function create_car(x,y,speed)
  then
   bone=create_bone(
    x+13,
-   y+y_rnd+11,
-   -6
+   y+y_rnd+12,
+   -13
   )
+  bone.floor_z=-6
  end
 
  local instance={
@@ -1264,6 +1290,7 @@ local function update(inst)
  inst.x+=scroll_speed
  inst.y+=inst.dy
  inst.z+=inst.dz
+ -- always follow the dog
  inst.dy=(dog.y-inst.y-8)/8
  
  -- apply gravity
@@ -1339,18 +1366,6 @@ local function update(inst)
    end
   end
  end
- 
- -- update the shadow color,
- -- which will depend on the
- -- surface the human is on top
- -- of
- inst.shad_col=5
- if inst.y+8<113 and inst.y+8>40 then
-  inst.shad_col=0
- end
- if inst.floor_z!=0 then
-  inst.shad_col=1
- end
 
  -- update sprites
  inst.spr_aux+=1
@@ -1365,6 +1380,17 @@ local function update(inst)
    #sprts,
    flr(inst.spr_aux/frames_per_sprite+0.5)
   )
+ end
+ 
+ -- update the shadow color,
+ -- which will depend on the
+ -- surface the human is on top
+ -- of
+ inst.shad_col=5
+ if inst.y+8<113 and inst.y+8>40 then
+  inst.shad_col=0
+ elseif inst.floor_z!=0 then
+  inst.shad_col=1
  end
 end
 
@@ -1431,11 +1457,28 @@ local function update(inst)
   inst.spr_aux=frames_per_sprite
  end
  inst.spr_index=flr(inst.spr_aux/frames_per_sprite+0.5)
+
+ -- update the shadow color
+ inst.shad_col=5
+ if inst.y<113 and inst.y>40 then
+  inst.shad_col=0
+ elseif inst.floor_z!=0 then
+  inst.shad_col=1
+ end
 end
 
 local function draw(inst)
- -- todo: add shadow?
  if not inst.taken then
+  -- draw shadow
+  ovalfill(
+   inst.x+2,
+   inst.y+3+inst.floor_z,
+   inst.x+6,
+   inst.y+5+inst.floor_z,
+   inst.shad_col
+  )
+ 
+  -- draw sprite
   local offset={
    x=inst.x,
    y=inst.y,
@@ -1453,9 +1496,11 @@ function create_bone(x,bottom_y,z)
   x=x,
   y=bottom_y-7,
   z=z,
+  floor_z=0,
   dx=0,
   spr_aux=frames_per_sprite,
   spr_index=1,
+  shad_col=5,
   taken=false,
  }
  
@@ -1468,15 +1513,29 @@ function create_bone(x,bottom_y,z)
  end
  
  instance._collision=function(x,y,z)
-  return collision(
-   x,y,z,
-   instance.x-1,
-   instance.x+9,
-   instance.y,
-   instance.y+11,
-   instance.z+1,
-   instance.z-12
-  )
+  if instance.floor_z<0 then
+   -- wider collision box when
+   -- on top of a car
+   return collision(
+    x,y,z,
+    instance.x-3,
+    instance.x+10,
+    instance.y-3,
+    instance.y+10,
+    instance.z+5,
+    instance.z-14
+   )
+  else
+   return collision(
+    x,y,z,
+    instance.x-1,
+    instance.x+8,
+    instance.y-1,
+    instance.y+8,
+    instance.z+2,
+    instance.z-9
+   )
+  end
  end
  
  return instance

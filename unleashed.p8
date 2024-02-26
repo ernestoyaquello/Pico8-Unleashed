@@ -18,9 +18,29 @@ function _init()
  meters_aux=0
  real_meters=0
  meters=0
+ restart=false
 end
 
 function _update60()
+ -- restart the game if needed
+ if state=="game over"
+ and btn(❎) or btn(🅾️)
+ then
+  -- schedule a restart for
+  -- when the button is
+  -- released, that way the
+  -- game doesn't start with
+  -- the dog jumping
+  restart=true
+ end
+ if restart
+ and not btn(❎)
+ and not btn(🅾️)
+ then
+  _init()
+  return
+ end
+
  local start_x=human.x-human_offset_x
  local end_x=human.x-human_offset_x+127
  
@@ -29,10 +49,15 @@ function _update60()
  -- everything to its start to
  -- make the horizontal
  -- scrolling infinite
+ local offset=nil
  local map_end_x=(128*8)-1
  if end_x>=map_end_x then
+  offset=-flr(map_end_x)+127
+ elseif start_x<=0 then
+  offset=-flr(start_x+0.5)+127
+ end
+ if offset!=nil then
   -- shift dog and human
-  local offset=-flr(map_end_x)+127
   dog.x+=offset
   for _,p in ipairs(dog.leash.leash) do
    p.x+=offset
@@ -72,7 +97,12 @@ function _update60()
  for i=1,#buildings do
   local b=buildings[i]
   local b_end_x=b.x+b.width-1
-  if b_end_x>=start_x then
+  -- using a 64 pixels margin
+  -- in case the camera needs
+  -- to go back, that way, the
+  -- building will still be
+  -- there
+  if b_end_x+64>=start_x then
    new_buildings[#new_buildings+1]=b
    max_b_end_x=max(max_b_end_x,b_end_x)
   end
@@ -104,12 +134,17 @@ function _update60()
  
  -- add bones at random on the
  -- sidewalk
- if flr(rnd(200/scroll_speed))==1
+ if state=="play"
+ and flr(rnd(200/scroll_speed))==1
  and #new_bones==0
  then
   local bx=end_x+1
+  local elev=flr(rnd(2))==0
   for _=1,2+flr(rnd(3)) do
    local nb=create_bone(bx,117,-3)
+   if elev then
+    nb.z=-15
+   end
    new_bones[#new_bones+1]=nb
    bx+=12
   end
@@ -129,10 +164,8 @@ function _update60()
  local new_car_ys={
   [18]=1.2,
   [40]=1.3,
-  -- this speed must be smaller
-  -- than the scroll speed!
   [116]=-1.0,
-  [130]=-0.9,
+  [131]=-0.9,
  }
  
  -- add existing cars, but
@@ -141,20 +174,21 @@ function _update60()
  for i=1,#cars do
   local c=cars[i]
   local c_end_x=c.x+c.width-1
-  if c.x<=end_x and c_end_x>=start_x then
+  if c.x<=end_x+1 and c_end_x>=start_x-1 then
    new_cars[#new_cars+1]=c
+   -- make the lane unavailable
+   -- for new cars in case
+   -- this one is too close to
+   -- where those new cars
+   -- would spawn
    if (
     (c.speed<0 
      or c.speed<scroll_speed)
-    and c_end_x+c.width>=end_x
+    and c_end_x+c.width+18>=end_x
    )
    or (c.speed>scroll_speed
-    and c.x-c.width<=start_x)
+    and c.x-c.width-18<=start_x)
    then
-    -- this "y" isn't available
-    -- for new cars, as a car
-    -- is already on it very
-    -- close to the spawn site
     new_car_ys[c.y]=nil
    end
   end
@@ -162,13 +196,17 @@ function _update60()
  
  -- add new cars at random
  for cy,spd in pairs(new_car_ys) do
+  -- avoid adding cars when
+  -- their speed matches the
+  -- scrolling, as they woulld
+  -- not move
   local factor=abs(spd-scroll_speed)
   if factor!=0
   and flr(rnd(60/factor))==0
   then
-   local nc_x=end_x
+   local nc_x=end_x+1
    if spd>scroll_speed then
-    nc_x=start_x-24
+    nc_x=start_x-32
    end
    local nc=create_car(nc_x,cy,spd)
    new_cars[#new_cars+1]=nc
@@ -181,7 +219,7 @@ function _update60()
  -- that they can be rendered
  -- in the right order
  cars={}
- for _,cy in ipairs({18,40,116,130}) do
+ for _,cy in ipairs({18,40,116,131}) do
   local aux_new_cars={}
   for _,c in ipairs(new_cars) do
    if c.y==cy then
@@ -220,7 +258,7 @@ end
 
 function _draw()
  local cam_x=human.x-human_offset_x
- local cam_y=12
+ local cam_y=20
 
  -- yellow for transparencies
  palt(0, false)
@@ -249,7 +287,7 @@ function _draw()
  -- dog
  local foregr_bones={}
  for _,b in ipairs(bones) do
-  if dog.y+6>b.y+3 then
+  if dog.y+6>b.y+2 then
    b._draw()
   else
    foregr_bones[#foregr_bones+1]=b
@@ -259,7 +297,7 @@ function _draw()
  -- draw bottom cars behind dog
  local foregr_cars={}
  for _,c in ipairs(bottom_cars) do
-  if dog.y+7>c.y+c.y_rnd+6
+  if dog.y+7>c.y+7
   then
    c._draw()
   else
@@ -339,6 +377,8 @@ end
 -- dog info --
 
 local jump_done=true
+local can_move_up=true
+local can_move_down=true
 
 -- this will be a singleton,
 -- so this object should never
@@ -369,45 +409,98 @@ local function spr_duration()
 end
 
 function dog._update()
+ local last_dog_x=dog.x
+ local last_dog_dx=dog.dx
+ local last_dog_y=dog.y
+
  local btn_click=btn(❎) or btn(🅾️)
- 
+
  -- jump functionality
  -- available again after jump
  -- button is released
- jump_done=jump_done or not btn_click
- 
+ jump_done=jump_done
+  or not btn_click
+
  -- jump if needed and able
  if btn_click
+ and state=="play"
  and abs(dog.z-dog.floor_z)<1
  and abs(dog.dz)<0.1
- and scroll_speed+dog.dx>0
+ and dog.dx>=0
+ and dog.dy==0
  and jump_done
  then
   dog.dz=-jump_acc
   jump_done=false
  end
 
- -- move up and down,
- -- using acceleration and
- -- deceleration for better
- -- feeling when moving
- if btn(⬆️) then
-  dog.dy-=0.18
-  dog.dy=max(-1.4,dog.dy)
- elseif btn(⬇️) then
-  dog.dy+=0.18
-  dog.dy=min(1.4,dog.dy)
- else
-  dog.dy/=1.6
-  if abs(dog.dy)<0.01 then
-   dog.dy=0
+ -- re-enable vertical move
+ -- once the button is released
+ can_move_up=can_move_up
+  or not btn(⬆️)
+ can_move_down=can_move_down
+  or not btn(⬇️)
+
+ -- move up and down if able
+ if state=="play"
+ and dog.dy==0
+ and dog.z==dog.floor_z
+ and dog.dz==0
+ and dog.dx>=0
+ then
+  if btn(⬆️)
+  and can_move_up
+  and dog.y>107
+  then
+   dog.dy-=0.1
+   can_move_up=false
+  elseif btn(⬇️)
+  and can_move_down
+  and dog.y<134
+  then
+   dog.dy+=0.1
+   can_move_down=false
+  end
+ end
+
+ -- ensure dog reaches one of
+ -- the valid lanes
+ local function dy_speed(a,b)
+  -- try to smooth out the
+  -- vertical movement between
+  -- point a and b by making
+  -- the dog go faster in the
+  -- middle and slower on the
+  -- sides
+  local diff=abs(a-b)/2
+  local offst=min(a,b)+diff
+  local div=diff*diff
+  local spd=1-((dog.y-offst)^2)/div
+  return 2.4*(0.25+spd)
+ end
+ if dog.dy<0 then
+  if dog.y>119 then
+   -- up from 134 to 119
+   dog.dy=-dy_speed(134,119)
+  elseif dog.y>107 then
+   -- up from 119 to 107
+   dog.dy=-dy_speed(119,107)
+  end
+ elseif dog.dy>0 then
+  if dog.y<119 then
+   -- down from 107 to 119
+   dog.dy=dy_speed(107,119)
+  elseif dog.y<134 then
+   -- down from 119 to 134
+   dog.dy=dy_speed(119,134)
   end
  end
  
  -- apply velocity deltas
- local last_dog_x=dog.x
- local last_dog_dx=dog.dx
- dog.x+=dog.dx+scroll_speed
+ if state=="play" then
+  dog.x+=scroll_speed
+ end
+ dog.x+=dog.dx
  dog.y+=dog.dy
  dog.z+=dog.dz
  
@@ -435,8 +528,9 @@ function dog._update()
  end
  
  -- stabilise horizontal speed
- -- to ensure the dog recovers
- -- from being pushed backwards
+ -- to ensure the dog
+ -- eventually stops moving
+ -- backwards
  if dog.dx<0 then
   dog.dx+=0.16*scroll_speed
   if dog.dx>=0 then
@@ -449,18 +543,32 @@ function dog._update()
   end
  end
  
- -- dog is within bounds
- if dog.y>132 then
-  dog.y=132+min(0.49,dog.y-flr(dog.y))
-  dog.dy=0
- elseif dog.y<104 then
-  dog.y=104+min(0.49,dog.y-flr(dog.y))
-  dog.dy=0
+ -- ensure the dog reaches one
+ -- of the official lanes and
+ -- stops moving vertically
+ if dog.dy>0 then
+  for _,lane_y in ipairs({119,134}) do
+   if last_dog_y<lane_y
+   and dog.y>=lane_y
+   then
+    dog.dy=0
+    dog.y=lane_y
+   end
+  end
+ elseif dog.dy<0 then
+  for _,lane_y in ipairs({119,107}) do
+   if last_dog_y>lane_y
+   and dog.y<=lane_y
+   then
+    dog.dy=0
+    dog.y=lane_y
+   end
+  end
  end
-
+ 
  -- detect collisions with cars
- local cp={dog.x+6,dog.y+7,0}
  dog.floor_z=0
+ local cp={dog.x+6,dog.y+7,0}
  for _,c in ipairs(cars) do
   if c.speed<0 then
    -- col returns the necessary
@@ -482,9 +590,10 @@ function dog._update()
      -- for the dog
      dog.floor_z=col[3]
 
+     -- ensure the dog is on
+     -- top and not inside
+     -- the car
      if dog.z>=col[3] then
-      -- the dog is on top of
-      -- the car
       dog.z=col[3]
      end
     elseif col[1]<0
@@ -497,14 +606,19 @@ function dog._update()
       -2,
       1.8*(c.speed-scroll_speed)
      )
+     -- slow down the car too
+     -- because of the crash
      c.dx=2.5*scroll_speed
     elseif col[2]!=0 then
      -- side car crash,
      -- dog will be moved
-     -- to avoid getting
-     -- inside the car
+     -- away from the car
      dog.y+=col[2]
-     dog.dy=0
+     if col[2]>0 then
+      dog.dy=0.1
+     else
+      dog.dy=-0.1
+     end
     end
     -- collision found, end
     -- the loop
@@ -512,61 +626,81 @@ function dog._update()
    end
   end
  end
- 
+
  -- detect collisions with
  -- bones that aren't taken
- local nt_bones={}
- for _,b in ipairs(bones) do
-  if not b.taken then
-   nt_bones[#nt_bones+1]=b
+ if state=="play" then
+  local nt_bones={}
+  for _,b in ipairs(bones) do
+   if not b.taken then
+    nt_bones[#nt_bones+1]=b
+   end
+  end
+  for _,c in ipairs(cars) do
+   if c.bone!=nil
+   and not c.bone.taken
+   then
+    nt_bones[#nt_bones+1]=c.bone
+   end
+  end
+  local cp={
+   dog.x+6,
+   dog.y+7,
+   dog.z-2,
+  }
+  for _,b in ipairs(nt_bones) do
+   local col=b._collision(
+    cp[1],cp[2],cp[3]
+   )
+   if col!=nil then
+    b.taken=true
+    bones_count+=1
+    break
+   end
   end
  end
- for _,c in ipairs(cars) do
-  if c.bone!=nil
-  and not c.bone.taken
-  then
-   nt_bones[#nt_bones+1]=c.bone
-  end
- end
- for _,b in ipairs(nt_bones) do
-  local col=b._collision(
-   cp[1],cp[2],dog.z-2
-  )
-  if col!=nil then
-   b.taken=true
-   bones_count+=1
-   break
-  end
+ 
+ -- check if it is game over
+ if state=="play"
+ and (dog.x<=human.x
+  or dog.x-human.x<=8)
+ then
+  state="game over"
  end
  
  -- update the dog sprite
- if current_dz==0 then
-  -- not jumping: running sprite
-  -- (6 sprites)
-  dog.spr_aux+=1
-  local frames_per_sprite=spr_duration()
-  local pushback=last_dog_dx<0
-  if pushback
-  or frames_per_sprite<=0
-  then
-   dog.sprite=2 -- sitting down
-   dog.spr_aux=spr_duration()*3
-  else
-   if dog.spr_aux>6*frames_per_sprite then
-    dog.spr_aux=frames_per_sprite
+ if state=="play" then
+  if current_dz==0 then
+   -- not jumping: running sprite
+   -- (6 sprites)
+   dog.spr_aux+=1
+   local frames_per_sprite=spr_duration()
+   local pushback=last_dog_dx<0
+   if pushback
+   or frames_per_sprite<=0
+   then
+    dog.sprite=2 -- sitting down
+    dog.spr_aux=spr_duration()*3
+   else
+    if dog.spr_aux>6*frames_per_sprite then
+     dog.spr_aux=frames_per_sprite
+    end
+    dog.sprite=min(
+     6,
+     flr(dog.spr_aux/frames_per_sprite+0.5)
+    )
    end
-   dog.sprite=min(
-    6,
-    flr(dog.spr_aux/frames_per_sprite+0.5)
-   )
+  else
+   -- jumping: take the right
+   -- sprite depending on the
+   -- progress of the jump
+   -- (10 sprites)
+   dog.sprite=32+9*((current_dz+jump_acc)/(2*jump_acc))
+   dog.sprite=max(32,min(41,dog.sprite))
   end
- else
-  -- jumping: take the right
-  -- sprite depending on the
-  -- progress of the jump
-  -- (10 sprites)
-  dog.sprite=32+9*((current_dz+jump_acc)/(2*jump_acc))
-  dog.sprite=max(32,min(41,dog.sprite))
+ elseif state=="game over" then
+  -- sitting down for game over
+  dog.sprite=11
  end
  
  -- update leash (needs updated
@@ -585,7 +719,8 @@ function dog._update()
 end
 
 function dog._draw()
- local leash_behind=dog.leash.leash[#dog.leash.leash].y+2<dog.y
+ local leash_behind=state=="play"
+  and dog.leash.leash[#dog.leash.leash].y+2<dog.y
 
  -- draw leash behind dog
  if leash_behind then
@@ -820,135 +955,159 @@ local function leash_rel_origin()
 end
 
 function leash._update()
- -- update leash point by point
- local o=leash_rel_origin()
- local new_leash={
-  {
-   x=dog.x+o.x,
-   y=dog.y,
-   z=dog.z+o.z,
-   dy=0,
-   dz=0,
-  },
- }
- for i=2,#leash.leash do
-  -- lp = last point
-  --  p = current point
-  local lp=new_leash[i-1]
-  local p=leash.leash[i]
-  
-  -- update point position
-  p.y+=p.dy
-  p.z+=p.dz
-  
-  -- avoid entering the floor
-  if p.z>0 then
-   p.z=0
-   p.dz=0
-  end
-  
-  -- update x movement deltas
-  local diff_x=p.x-lp.x
-  local dist_x=abs(diff_x)
-  if dist_x>0 then
-   -- move the point to catch
-   -- up with its predecessor,
-   -- which is now too far
-   if diff_x>0 then
-    p.x-=dist_x-1
-    p.dx=-dist_x/1.5
-   else
-    p.x-=diff_x+1
-    p.dx=dist_x/1.5
-   end
-  else
-   p.dx=0
-  end
-  
-  -- update y movement deltas
-  local diff_y=p.y-lp.y
-  local dist_y=abs(diff_y)
-  if dist_y>=1 then
-   -- move the point to catch
-   -- up with its predecessor,
-   -- which is now too far
-   if diff_y>0 then
-    p.y-=dist_y-1
-    p.dy=-dist_y/1.5
-   else
-    p.y-=diff_y+1
-    p.dy=dist_y/1.5
-   end
-  else
-   p.dy=0
-  end
-  
-  -- update z movement deltas
-  local diff_z=p.z-lp.z
-  local dist_z=abs(diff_z)
-  if dist_z>1 then
-   -- move the point to catch
-   -- up with its predecessor,
-   -- which is now too far
-   if diff_z>0 then
-    p.z-=diff_z-1
-    p.dz=-dist_z/2
-   else
-    p.z-=diff_z+1
-    p.dz=dist_z/2
-   end
-  else
-   -- apply gravity
-   if p.z<0 then
-    p.dz+=gravity
-   else
+ if state=="play" then
+  -- update leash point by point
+  local o=leash_rel_origin()
+  local new_leash={
+   {
+    x=dog.x+o.x,
+    y=dog.y,
+    z=dog.z+o.z,
+    dy=0,
+    dz=0,
+   },
+  }
+  for i=2,#leash.leash do
+   -- lp = last point
+   --  p = current point
+   local lp=new_leash[i-1]
+   local p=leash.leash[i]
+   
+   -- update point position
+   p.y+=p.dy
+   p.z+=p.dz
+   
+   -- avoid entering the floor
+   if p.z>0 then
+    p.z=0
     p.dz=0
    end
+   
+   -- update x movement deltas
+   local diff_x=p.x-lp.x
+   local dist_x=abs(diff_x)
+   if dist_x>0 then
+    -- move the point to catch
+    -- up with its predecessor,
+    -- which is now too far
+    if diff_x>0 then
+     p.x-=dist_x-1
+     p.dx=-dist_x/1.5
+    else
+     p.x-=diff_x+1
+     p.dx=dist_x/1.5
+    end
+   else
+    p.dx=0
+   end
+   
+   -- update y movement deltas
+   local diff_y=p.y-lp.y
+   local dist_y=abs(diff_y)
+   if dist_y>=1 then
+    -- move the point to catch
+    -- up with its predecessor,
+    -- which is now too far
+    if diff_y>0 then
+     p.y-=dist_y-1
+     p.dy=-dist_y/1.5
+    else
+     p.y-=diff_y+1
+     p.dy=dist_y/1.5
+    end
+   else
+    p.dy=0
+   end
+   
+   -- update z movement deltas
+   local diff_z=p.z-lp.z
+   local dist_z=abs(diff_z)
+   if dist_z>1 then
+    -- move the point to catch
+    -- up with its predecessor,
+    -- which is now too far
+    if diff_z>0 then
+     p.z-=diff_z-1
+     p.dz=-dist_z/2
+    else
+     p.z-=diff_z+1
+     p.dz=dist_z/2
+    end
+   else
+    -- apply gravity
+    if p.z<0 then
+     p.dz+=gravity
+    else
+     p.dz=0
+    end
+   end
+   
+   -- ensure there aren't gaps
+   -- between this point and the
+   -- previous one this one is
+   -- attached to. these gaps
+   -- could happen because we
+   -- calculate the y and z
+   -- independently above, which
+   -- could lead to a distance
+   -- of 2 between the points.
+   local v_diff=(lp.y+lp.z)-(p.y+p.z)
+   if v_diff>1 then
+    p.y+=v_diff-1
+   elseif v_diff<-1 then
+    p.y+=v_diff+1
+   end
+   
+   new_leash[#new_leash+1]=p
   end
   
-  -- ensure there aren't gaps
-  -- between this point and the
-  -- previous one this one is
-  -- attached to. these gaps
-  -- could happen because we
-  -- calculate the y and z
-  -- independently above, which
-  -- could lead to a distance
-  -- of 2 between the points.
-  local v_diff=(lp.y+lp.z)-(p.y+p.z)
-  if v_diff>1 then
-   p.y+=v_diff-1
-  elseif v_diff<-1 then
-   p.y+=v_diff+1
-  end
-  
-  new_leash[#new_leash+1]=p
+  -- finally update the leash
+  dog.leash.leash=new_leash
  end
- 
- -- finally update the leash
- dog.leash.leash=new_leash
 end
 
 function leash._draw()
- for i=1,#leash.leash do
-  local p=leash.leash[i]
-  if i<#leash.leash then
-   -- draw leash point
-  pset(
-   p.x-8,
-   p.y+7+p.z,
-   2
-  )
-  else
-   -- draw leash handle
-   rectfill(
-   p.x-9,
-   p.y+p.z+6,
-   p.x-8,
-   p.y+p.z+7,
+ -- draw the leash normally
+ -- while playing
+ if state=="play" then
+  for i=1,#leash.leash do
+   local p=leash.leash[i]
+   if i<#leash.leash then
+    -- draw leash point
+    pset(
+     p.x-8,
+     p.y+7+p.z,
+     2
+    )
+   else
+    -- draw leash handle
+    rectfill(
+     p.x-9,
+     p.y+p.z+6,
+     p.x-8,
+     p.y+p.z+7,
+     0
+    )
+   end
+  end
+
+ -- draw the human holding the
+ -- leash if the dog is caught
+ elseif state=="game over" then
+  -- draw leash handle
+  rectfill(
+   human.x+6,
+   human.y+human.z+11,
+   human.x+7,
+   human.y+human.z+12,
    0
   )
-  end
+  -- draw leash
+  line(
+   human.x+8,human.y+human.z+13,
+   dog.x+4,dog.y+6,
+   2
+  )
  end
 end
 
@@ -1094,8 +1253,20 @@ local function update(inst)
   inst.dx=0
  end
  
- -- apply velocity deltas
- inst.x+=inst.speed+inst.dx
+ -- apply scroll speed to car,
+ -- but only if the game is
+ -- playing (or if the lane
+ -- isn't occupied by the dog
+ -- while the game is over)
+ if state=="play"
+ or (inst.y==116 and dog.y!=119)
+ or (inst.y==131 and dog.y!=134)
+ or inst.speed>0
+ or inst.x<human.x
+ then
+  inst.x+=inst.speed
+ end
+ inst.x+=inst.dx
  
  -- update bone if needed
  if inst.bone!=nil then
@@ -1107,13 +1278,6 @@ local function update(inst)
 end
 
 function create_car(x,y,speed)
- -- random y deviation to make
- -- sure this car doesn't go
- -- through its lane perfectly,
- -- that way each car drives
- -- a little bit differently
- local y_rnd=flr(rnd(6))-2.5
- 
  -- randomly place a bone on
  -- top of the car
  local bone=nil
@@ -1122,16 +1286,15 @@ function create_car(x,y,speed)
  then
   bone=create_bone(
    x+13,
-   y+y_rnd+12,
+   y+13,
    -13
   )
-  bone.floor_z=-6
+  bone.floor_z=-7
  end
 
  local instance={
   x=x,
   y=y,
-  y_rnd=y_rnd,
   z=0,
   speed=speed,
   dx=0,
@@ -1176,7 +1339,7 @@ function create_car(x,y,speed)
   -- draw car
   local offset={
    x=instance.x,
-   y=instance.y+instance.y_rnd,
+   y=instance.y,
    z=0,
   }
   draw_sprts(car,offset)
@@ -1192,20 +1355,20 @@ function create_car(x,y,speed)
    x,y,z,
    instance.x,
    instance.x+11,
-   instance.y+instance.y_rnd+6,
-   instance.y+instance.y_rnd+instance.height-2,
+   instance.y+7,
+   instance.y+instance.height-1,
    0,
-   -3
+   -4
   )
   if col==nil then
    col=collision(
     x,y,z,
     instance.x+11,
     instance.x+24,
-    instance.y+instance.y_rnd+6,
-    instance.y+instance.y_rnd+instance.height-2,
+    instance.y+7,
+    instance.y+instance.height-1,
     0,
-    -6
+    -7
    )
   end
   if col==nil then
@@ -1213,10 +1376,10 @@ function create_car(x,y,speed)
     x,y,z,
     instance.x+24,
     instance.x+instance.width,
-    instance.y+instance.y_rnd+6,
-    instance.y+instance.y_rnd+instance.height-2,
+    instance.y+7,
+    instance.y+instance.height-1,
     0,
-    -3
+    -4
    )
   end
   
@@ -1272,10 +1435,10 @@ end
 local sprts={
  {{colswap=nil},{42},{58}},
  {{colswap=nil},{43},{59}},
- {{colswap=nil},{44},{60}},
- {{colswap=nil},{45},{61}},
- {{colswap=nil},{46},{62}},
- {{colswap=nil},{47},{63}},
+ {{colswap=nil},{43},{60}},
+ {{colswap=nil},{43},{61}},
+ {{colswap=nil},{43},{62}},
+ {{colswap=nil},{42},{63}},
 }
 
 local function spr_duration()
@@ -1287,11 +1450,22 @@ end
 
 local function update(inst)
  -- apply velocity deltas
- inst.x+=scroll_speed
+ if state=="play" then
+  inst.x+=scroll_speed
+ end
+ inst.x+=inst.dx
  inst.y+=inst.dy
  inst.z+=inst.dz
- -- always follow the dog
- inst.dy=(dog.y-inst.y-8)/8
+ 
+ if state=="play" then
+  -- follow the dog
+  inst.dy=(dog.y-inst.y-8)/8
+ elseif state=="game over" then
+  -- get next to the dog to
+  -- hold it by the leash
+  inst.dx=(dog.x-inst.x-11)/5
+  inst.dy=(dog.y-inst.y-8)/5
+ end
  
  -- apply gravity
  inst.dz+=gravity
@@ -1339,7 +1513,9 @@ local function update(inst)
  -- detect if the human will
  -- collide with the car soon
  -- to make him jump if needed
- if not collided then
+ if not collided
+ and state=="play"
+ then
   local cp_future={
    cp[1]+(18*scroll_speed),
    cp[2]+(10*inst.dy),
@@ -1368,18 +1544,27 @@ local function update(inst)
  end
 
  -- update sprites
- inst.spr_aux+=1
- local frames_per_sprite=spr_duration()
- if frames_per_sprite<=0 then
-  inst.sprites=sprts[2]
- else
-  if inst.spr_aux>#sprts*frames_per_sprite then
-   inst.spr_aux=frames_per_sprite
+ local running=state=="play" or
+  (state=="game over"
+  and (abs(dog.x-inst.x-11)>1
+   or abs(dog.y-inst.y-8)>1))
+ if running then
+  inst.spr_aux+=1
+  local frames_per_sprite=spr_duration()
+  if frames_per_sprite<=0 then
+   inst.sprites=sprts[2]
+  else
+   if inst.spr_aux>#sprts*frames_per_sprite then
+    inst.spr_aux=frames_per_sprite
+   end
+   inst.spr_index=min(
+    #sprts,
+    flr(inst.spr_aux/frames_per_sprite+0.5)
+   )
   end
-  inst.spr_index=min(
-   #sprts,
-   flr(inst.spr_aux/frames_per_sprite+0.5)
-  )
+ else
+  -- not running, still pose
+  inst.spr_index=nil
  end
  
  -- update the shadow color,
@@ -1404,16 +1589,20 @@ local function draw(inst)
   inst.shad_col
  )
  
- -- draw human sprites
+ -- draw sprites for the human
  local offset={
   x=inst.x,
   y=inst.y,
   z=inst.z,
  }
- draw_sprts(
-  sprts[inst.spr_index],
-  offset
- )
+ local n_sprts={
+  -- still pose by default
+  {colswap=nil},{14},{30},
+ }
+ if inst.spr_index!=nil then
+  n_sprts=sprts[inst.spr_index]
+ end
+ draw_sprts(n_sprts,offset)
 end
 
 function create_human(x,bottom_y)
@@ -1421,6 +1610,7 @@ function create_human(x,bottom_y)
   x=x,
   y=bottom_y-16,
   z=0,
+  dx=0,
   dy=0,
   dz=0,
   floor_z=0,
@@ -1471,7 +1661,7 @@ local function draw(inst)
  if not inst.taken then
   -- draw shadow
   ovalfill(
-   inst.x+2,
+   inst.x+1,
    inst.y+3+inst.floor_z,
    inst.x+6,
    inst.y+5+inst.floor_z,
@@ -1528,11 +1718,11 @@ function create_bone(x,bottom_y,z)
   else
    return collision(
     x,y,z,
-    instance.x-1,
-    instance.x+8,
+    instance.x-2,
+    instance.x+9,
     instance.y-1,
     instance.y+8,
-    instance.z+2,
+    instance.z+5,
     instance.z-9
    )
   end
@@ -1541,34 +1731,34 @@ function create_bone(x,bottom_y,z)
  return instance
 end
 __gfx__
-00000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbaaaaaaaaa0000000000000000000000000000000000000000
-00000000aaaaaaaaaaaaaaaaaaaaa0aaaaaaa0aaaaaaaaaaaaaaaaaaaaaaaaaaaaa3bbbbbbbbbbb3aaaaaaaa0000000000000000000000000000000000000000
-007007004aaaa0aaaaaaa0aaaaaaa44aaaaaa44aaaaaa0aa4aaaa0aaaaaaaaaaa333bbbbbbbbbbb33aaaaaaa0000000000000000000000000000000000000000
-000770004aaaa44a4aaaa44a4aaa80404aaa80404aaaa44a4aaaa44aaabbbbb331d3bbbbbbbbbbb31333bbaa0000000000000000000000000000000000000000
-00077000a44480404a4480404a4480444a4480444a448040a4448040abbbbb3111d3bbbbbbbbbbb3103b3b1a0000000000000000000000000000000000000000
-00700700a4448044a4448044a444484aa44448aaa4448044a44480446bbbbb3111d3bbbbbbbbbbb31133bb300000000000000000000000000000000000000000
-00000000aa4448aaa44448aaa444aaaa444444aaa44448aaa44448aa3bbbbb3111d3bbbbbbbbbbb3103b3b100000000000000000000000000000000000000000
-00000000aa44aaaaaa4a4aaaa4aaaaaaaaaaaa4a4aaaa4aaaaaa4aaa3bbbbb3111d33333333333331133bb300000000000000000000000000000000000000000
-666666665655555556555555666666666666666666666666aaaaaaaa3bbbbb311331111113111111303b3b10aaaaa4aaaaaaa9aaaaaaaaaa0000000000000000
-666666665555565555555655666666666666666666666666aaadddaa3bbbbbb331111111131111111333bb30aaaa474aaaaa979aaaaaaaaa0000000000000000
-666666665555555555555555666666666666666666666666aadd6dda3b3333333333333333333333333338e0aaaa4774aaaa9779aaaafaaa0000000000000000
-666666665555555555555555555555556666666666666666a5ddddda63333333333333333333333333333885aaa4722aaaa97eeaaaaaffaa0000000000000000
-666666665565555555655555556555556666666666666666a55d5d5a76333333111333333333331113333315a4472aaaa997eaaaaaafaaaa0000000000000000
-666666665555556555555555555555656666666666666666a155555a5133333155513333333331555133331a4772aaaa977eaaaaaffaaaaa0000000000000000
-666666665555555550505050555555556777777777666666aa1111aaa511111055501111111110555011115aa262aaaaae6eaaaaaafaaaaa0000000000000000
-666666665555555505050505555555556777777777666666aaaaaaaaaa5555550005555555555500055555aaaa2aaaaaaaeaaaaaaaaaaaaa0000000000000000
-aaaaaaaaaaaaaaaaaaaaa0aaaaaaa0aaaaaaa0aaaaaaaaaa4aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-aaaaaaaaaaaaa0aaaaaaa44aaaaaa44a4aaaa44a4aaaa0aa4aaaa0aa4aaaa0aaaaaaa0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-aaaaa0aaaaaaa44aaaaa80404aaa80404aaa80404aaaa44aa4aaa44a4aaaa44a4aaaa44a4aaaa0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-4aaaa44a4aaa80404aa480444a448044a4448044a4aa8040444a8040a44a80404aaa80404aaaa44aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-4a4480404a4480444a4448aaa44448aa444448aa444480444444804444448044a4448044a4448040aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-a4448044a44448aaa44444aa444444aa444444aa444448aa444448aa444448aaa44448aaa4448044aaa04aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04aaa
-a44448aa444444aa444aaaaa44aaaaaa44aaa4aa444444aaa4a444aa44a444aaa4a44aaaa4a448aaaaa44aaaaaa04aaaaaa04aaaaaa04aaaaaa04aaaaaa44aaa
-aaa44aaa44aaaaaa44aaaaaaaaaaaaaaaaaaaaaaaaaaa4aaaaaaa4aaa4aa4aaaa4aa4aaaaa4a4aaaaa222aaaaaa44aaaaaa44aaaaaa44aaaaaa44aaaaa222aaa
-aa267daaaa267daaaddaaddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa565555555050505050505050a2a2224aaa222aaaaaa22aaaaaa22aaaaaa22aaaaa222aaa
-aa267daaaa267daa267dd76daaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa555556550505050505050505a4a22aaaaa422aaaaaa22aaaaaa22aaaaa222aaaaa42224a
-aa267daaaa267daa2677777d4aaa656aaaaa656aaaaa656aaaaa656a555555555050505050505050aaa22aaaaaa224aaaaa22aaaaaa22aaaaa222aaaaaa22aaa
-aa267daaaa267daaa26777da4aa66ff64aa66ff64aa66ff64aa66ff6555555550505050505050505aaaccaaaaaa22aaaaaa42aaaaaa24aaaaa4224aaaaacccaa
+00000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbaaaaaaaaaaaaaaaaa0000000000000000aaaa8aaa00000000
+00000000aaaaaaaaaaaaaaaaaaaaa0aaaaaaa0aaaaaaaaaaaaaaaaaaaaaaaaaaaaa3bbbbbbbbbbb3aaaaaaaaaaaaaaaa0000000000000000aaaa8aaa00000000
+007007004aaaa0aaaaaaa0aaaaaaa44aaaaaa44aaaaaa0aa4aaaa0aaaaaaaaaaa333bbbbbbbbbbb33aaaaaaaaaaaa0aa0000000000000000aaaa8aaa00000000
+000770004aaaa44a4aaaa44a4aaa80404aaa80404aaaa44a4aaaa44aaabbbbb331d3bbbbbbbbbbb31333bbaa4aaaa44a0000000000000000aaaaaaaa00000000
+00077000a44480404a4480404a4480444a4480444a448040a4448040abbbbb3111d3bbbbbbbbbbb3103b3b1a4a4480400000000000000000aaaa8aaa00000000
+00700700a4448044a4448044a444484aa44448aaa4448044a44480446bbbbb3111d3bbbbbbbbbbb31133bb30a44480440000000000000000aaaaaaaa00000000
+00000000aa4448aaa44448aaa444aaaa444444aaa44448aaa44448aa3bbbbb3111d3bbbbbbbbbbb3103b3b10a44448aa0000000000000000aaa0faaa00000000
+00000000aa44aaaaaa4a4aaaa4aaaaaaaaaaaa4a4aaaa4aaaaaa4aaa3bbbbb3111d33333333333331133bb30aa44a4aa0000000000000000aaaffaaa00000000
+666666665655555556555555666666666666666666666666aaaaaaaa3bbbbb311331111113111111303b3b10aaaaa4aaaaaaa9aaaaaaaaaaaaa22aaa00000000
+666666665555565555555655666666666666666666666666aaadddaa3bbbbbb331111111131111111333bb30aaaa474aaaaa979aaaaaaaaaaa222aaa00000000
+666666665555555555555555666666666666666666666666aadd6dda3b3333333333333333333333333338e0aaaa4774aaaa9779aaaafaaaaa222aaa00000000
+666666665555555555555555555555556666666666666666a5ddddda63333333333333333333333333333885aaa4722aaaa97eeaaaaaffaaaaf22faa00000000
+666666665565555555655555556555556666666666666666a55d5d5a76333333111333333333331113333315a4472aaaa997eaaaaaafaaaaaaaccaaa00000000
+666666665555556555555555555555656666666666666666a155555a5133333155513333333331555133331a4772aaaa977eaaaaaffaaaaaaaaccaaa00000000
+666666665555555550505050555555556777777777666666aa1111aaa511111055501111111110555011115aa462aaaaa96eaaaaaafaaaaaaaaccaaa00000000
+666666665555555505050505555555556777777777666666aaaaaaaaaa5555550005555555555500055555aaaa2aaaaaaaeaaaaaaaaaaaaaaaa11aaa00000000
+aaaaaaaaaaaaaaaaaaaaa0aaaaaaa0aaaaaaa0aaaaaaaaaa4aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa00000000000000000000000000000000
+aaaaaaaaaaaaa0aaaaaaa44aaaaaa44a4aaaa44a4aaaa0aa4aaaa0aa4aaaa0aaaaaaa0aaaaaaaaaaaaaaaaaaaaaaaaaa00000000000000000000000000000000
+aaaaa0aaaaaaa44aaaaa80404aaa80404aaa80404aaaa44aa4aaa44a4aaaa44a4aaaa44a4aaaa0aaaaaaaaaaaaaaaaaa00000000000000000000000000000000
+4aaaa44a4aaa80404aa480444a448044a4448044a4aa8040444a8040a44a80404aaa80404aaaa44aaaaaaaaaaaaaaaaa00000000000000000000000000000000
+4a4480404a4480444a4448aaa44448aa444448aa444480444444804444448044a4448044a4448040aaaaaaaaaaaaaaaa00000000000000000000000000000000
+a4448044a44448aaa44444aa444444aa444444aa444448aa444448aa444448aaa44448aaa4448044aaa0faaaaaaaaaaa00000000000000000000000000000000
+a44448aa444444aa444aaaaa44aaaaaa44aaa4aa444444aaa4a444aa44a444aaa4a44aaaa4a448aaaaaffaaaaaa0faaa00000000000000000000000000000000
+aaa44aaa44aaaaaa44aaaaaaaaaaaaaaaaaaaaaaaaaaa4aaaaaaa4aaa4aa4aaaa4aa4aaaaa4a4aaaaa222aaaaaaffaaa00000000000000000000000000000000
+aa267daaaa267daaaddaaddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa565555555050505050505050a2a222faaa222aaaaaa22aaaaaa22aaaaaa22aaaaa222aaa
+aa267daaaa267daa267dd76daaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa555556550505050505050505afa22aaaaaf22aaaaaa22aaaaaa22aaaaa222aaaaaf222fa
+aa267daaaa267daa2677777d4aaa656aaaaa656aaaaa656aaaaa656a555555555050505050505050aaa22aaaaaa22faaaaa22aaaaaa22aaaaa222aaaaaa22aaa
+aa267daaaa267daaa26777da4aa66ff64aa66ff64aa66ff64aa66ff6555555550505050505050505aaaccaaaaaa22aaaaaaf2aaaaaa2faaaaaf22faaaaacccaa
 a26777daaa267daaaa267daaa44fe5f54a4fe5f54a4fe5f54a4fe5f5505050505050505050505050aaacacaaaaaccaaaaaaccaaaaaaccaaaaaaccaaaaaacacaa
 2677777daa267daaaa267daaa44fe5ffa44fe5ffa44fe5ffa44fe5ff050505050505050505050505a1caaacaaaaccaaaaaaccaaaaaaccaaaaaacacaaaacaaa1a
 267dd76daa267daaaa267daaa444fe6aa4444e6aa444444aa4444e6a505050505555555550505050aaaaaaa1aa1cacaaaaa1caaaaaac1aaaaacaa1aaaa1aaaaa
@@ -1626,4 +1816,5 @@ __map__
 1212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212
 1010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010
 1415141514151415141514151415141514151415141514151415141514151415141514151415141514151415141514151415141514151415141514151415141514151415141514151415141514151415141514151415141514151415141514151415141514151415141514151415141514151415141514151415141514151415
+1010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010
 1010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010

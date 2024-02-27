@@ -11,26 +11,37 @@ function _init()
  human=create_human(human_offset_x,114)
  dog_offset_x=48
  dog=create_dog(dog_offset_x,114)
+ cam_shake=0
+ cam_offset_x=0
+ cam_offset_y=0
  buildings={}
  bones={}
  cars={}
+ stopped_car_lane=nil
  bones_count=0
  meters_aux=0
  real_meters=0
  meters=0
+ game_over_msg=nil
+ clip_circle_radius=nil
+ clip_circle_x=0
+ clip_circle_y=0
  restart=false
 end
 
 function _update60()
  -- restart the game if needed
  if state=="game over"
- and btn(❎) or btn(🅾️)
+ and game_over_msg!=nil
+ and game_over_msg.finished
+ and (btn(❎) or btn(🅾️))
  then
   -- schedule a restart for
   -- when the button is
   -- released, that way the
   -- game doesn't start with
-  -- the dog jumping
+  -- the dog immediately
+  -- jumping
   restart=true
  end
  if restart
@@ -140,7 +151,7 @@ function _update60()
  then
   local bx=end_x+1
   local elev=flr(rnd(2))==0
-  for _=1,2+flr(rnd(3)) do
+  for _=1,1+flr(rnd(3)) do
    local nb=create_bone(bx,117,-3)
    if elev then
     nb.z=-15
@@ -254,18 +265,85 @@ function _update60()
  -- each 100 meters
  scroll_speed=scroll_speed_deft
   +min(1,flr(meters/100)/20)
+  
+ -- shake the camera if needed
+ -- to dramatize car crashes
+ if cam_shake!=0 then
+  cam_offset_x=4-rnd(8)
+  cam_offset_y=4-rnd(8)
+  cam_offset_x*=cam_shake
+  cam_offset_y*=cam_shake
+  
+  cam_shake/=1.6
+  if cam_shake<0.05 then
+   cam_shake=0
+   cam_offset_x=0
+   cam_offset_y=0
+  end
+ end
+ 
+ -- once the game is over, show
+ -- a clipping circle that
+ -- closes on the dog
+ if state=="game over"
+ then
+  -- make the radius smaller
+  -- over time, or suddenly if
+  -- the user is pressing a
+  -- button to skip animations
+  if clip_circle_radius==nil then
+   clip_circle_radius=350
+  elseif clip_circle_radius>1 then
+   clip_circle_radius-=max(1,(0.02*clip_circle_radius))
+   if clip_circle_radius<1
+   or (btn(❎) or btn(🅾️))
+   then
+    clip_circle_radius=0
+    -- the dog and human are no
+    -- longer visible, bring
+    -- the game over message
+    if game_over_msg==nil then
+     game_over_msg=create_game_over_msg()
+    end
+   end
+  end
+  local half_radius=flr(clip_circle_radius/2)
+  clip_circle_x=flr(dog.x)-half_radius
+  clip_circle_y=flr(dog.y)-half_radius
+ end
+ 
+ if game_over_msg!=nil then
+  game_over_msg._update()
+ end
 end
 
 function _draw()
- local cam_x=human.x-human_offset_x
- local cam_y=20
+ local cam_x=human.x-human_offset_x+cam_offset_x
+ local cam_y=20+cam_offset_y
 
  -- yellow for transparencies
  palt(0, false)
  palt(10, true)
  
+ -- clip screen to the area
+ -- that the clipping circle
+ -- will cover if needed
+ if clip_circle_radius!=nil then
+  cls(0)
+  if clip_circle_radius>0 then
+   clip(
+    clip_circle_x-flr(cam_x),
+    clip_circle_y-flr(cam_y),
+    clip_circle_radius,
+    clip_circle_radius
+   )
+  else
+   clip(0,0,0,0)
+  end
+ end
+
  -- draw the different elements
- camera(cam_x,cam_y) 
+ camera(cam_x,cam_y)
  map()
  
  -- draw top cars
@@ -321,6 +399,27 @@ function _draw()
  for _,c in ipairs(foregr_cars) do
   c._draw()
  end
+ 
+ -- draw the clipping circle
+ -- if needed
+ if clip_circle_radius!=nil then
+  sspr(
+   0,
+   96,
+   32,
+   32,
+   clip_circle_x,
+   clip_circle_y,
+   clip_circle_radius,
+   clip_circle_radius
+  )
+  clip()
+ end
+ 
+ -- draw game over message
+ if game_over_msg!=nil then
+  game_over_msg._draw()
+ end
 
  -- draw scores
  local m_str=tostr(meters)
@@ -351,14 +450,20 @@ function _draw()
  )
  
  -- 2. draw bones count
+ local bones_c_offset_x=0
+ local bones_c_offset_y=0
  rect(
-  m_end_x+4,cam_y+3,
-  m_end_x+16+4*#bc_str,cam_y+11,
+  m_end_x+4,
+  cam_y+3,
+  m_end_x+16+4*#bc_str,
+  cam_y+11,
   0
  )
  rectfill(
-  m_end_x+3,cam_y+2,
-  m_end_x+15+4*#bc_str,cam_y+10,
+  m_end_x+3,
+  cam_y+2,
+  m_end_x+15+4*#bc_str,
+  cam_y+10,
   2
  )
  spr(
@@ -376,9 +481,9 @@ end
 -->8
 -- dog info --
 
-local jump_done=true
-local can_move_up=true
-local can_move_down=true
+local jump_done=nil
+local can_move_up=nil
+local can_move_down=nil
 
 -- this will be a singleton,
 -- so this object should never
@@ -609,6 +714,9 @@ function dog._update()
      -- slow down the car too
      -- because of the crash
      c.dx=2.5*scroll_speed
+     -- shake cam to add drama
+     -- to the crash
+     cam_shake=1
     elseif col[2]!=0 then
      -- side car crash,
      -- dog will be moved
@@ -619,6 +727,9 @@ function dog._update()
      else
       dog.dy=-0.1
      end
+     -- shake cam to add drama
+     -- to the crash
+     cam_shake=1
     end
     -- collision found, end
     -- the loop
@@ -765,6 +876,10 @@ function create_dog(x,bottom_y)
   dog.y,
   0
  )
+ 
+ jump_done=true
+ can_move_up=true
+ can_move_down=true
 
  return dog
 end
@@ -1139,109 +1254,6 @@ function create_leash(dog_x,dog_y,dog_z)
  return leash
 end
 -->8
--- collisions helper --
-
--- returns a table with the
--- {x,y,z} diffs needed to
--- correct the position of the
--- point defined by x,y,z in
--- order to stop its collision
--- with the 3d prism defined by
--- the other parameters, or nil
--- if there is no collision.
-function collision(
- x,y,z,
- obs_x,obs_x2,
- obs_y,obs_y2,
- obs_z,obs_z2
-)
- local fix={}
-
- -- correct the x, pushing the
- -- point left or right
- -- (whichever way the x move
- -- is shorter).
- if x>=obs_x and x<=obs_x2 then
-  if abs(x-obs_x)<abs(x-obs_x2) then
-   -- push left
-   fix[1]=obs_x-x
-   if fix[1]>-0.5 then
-    fix[1]=-0.5
-   end
-  else
-   -- push right
-   fix[1]=obs_x2-x
-   if fix[1]<0.5 then
-    fix[1]=0.5
-   end
-  end
- else
-  -- no collision found
-  return nil
- end
-
- -- correct the y, pushing the
- -- point up or down (whichever
- -- way the y move is shorter).
- if y>=obs_y and y<=obs_y2 then
-  if abs(y-obs_y)<abs(y-obs_y2) then
-   -- push up
-   fix[2]=obs_y-y
-   if fix[2]>-0.5 then
-    fix[2]=-0.5
-   end
-  else
-   -- push down
-   fix[2]=obs_y2-y
-   if fix[2]<0.5 then
-    fix[2]=0.5
-   end
-  end
- else
-  -- no collision found
-  return nil
- end
-
- -- correct the z, pushing the
- -- point upwards in the air
- -- when needed.
- if z<=obs_z and z>=obs_z2 then
-  fix[3]=obs_z2-z
-  if fix[3]>-0.5 then
-   fix[3]=-0.5
-  end
- else
-  -- no collision found
-  return nil
- end
- 
- -- choose the x correction if
- -- it has the shortest path
- --if abs(fix[1])<abs(fix[2])
- --and abs(fix[1])<abs(fix[3])
- --then
- -- fix[2],fix[3]=0,0
- --end
-
- -- choose the y correction if
- -- it has the shortest path
- --if abs(fix[2])<abs(fix[1])
- --and abs(fix[2])<abs(fix[3])
- --then
- -- fix[1],fix[3]=0,0
- --end
- 
- -- choose the z correction if
- -- it has the shortest path
- --if abs(fix[3])<abs(fix[1])
- --and abs(fix[3])<abs(fix[2])
- --then
- -- fix[1],fix[2]=0,0
- --end
-
- return fix
-end
--->8
 -- car info --
 
 -- todo: moving wheels
@@ -1258,13 +1270,17 @@ local function update(inst)
  -- playing (or if the lane
  -- isn't occupied by the dog
  -- while the game is over)
- if state=="play"
- or (inst.y==116 and dog.y!=119)
- or (inst.y==131 and dog.y!=134)
- or inst.speed>0
- or inst.x<human.x
+ if stopped_car_lane!=inst.y
+ and (state=="play"
+  or inst.speed>0
+  or inst.x<human.x
+  or inst.x-24>dog.x
+  or (inst.y==116 and dog.y!=119)
+  or (inst.y==131 and dog.y!=134))
  then
   inst.x+=inst.speed
+ else
+  stopped_car_lane=inst.y
  end
  inst.x+=inst.dx
  
@@ -1389,8 +1405,16 @@ function create_car(x,y,speed)
  return instance
 end
 -->8
--- drawing helper --
+-- helpers --
 
+-- drawing helper to draw
+-- multiple sprites as a single
+-- element. each row will be
+-- drawn as a row, starting
+-- from the second one (the
+-- first row indicates color
+-- swaps). negative values
+-- indicate horizontal flip.
 function draw_sprts(sprts,offset)
  local colswap=sprts[1].colswap
  if colswap~=nil then
@@ -1428,6 +1452,107 @@ function draw_sprts(sprts,offset)
   y=row*8+offset.y,
   z=offset.z,
  }
+end
+
+-- returns a table with the
+-- {x,y,z} diffs needed to
+-- correct the position of the
+-- point defined by x,y,z in
+-- order to stop its collision
+-- with the 3d prism defined by
+-- the other parameters, or nil
+-- if there is no collision.
+function collision(
+ x,y,z,
+ obs_x,obs_x2,
+ obs_y,obs_y2,
+ obs_z,obs_z2
+)
+ local fix={}
+
+ -- correct the x, pushing the
+ -- point left or right
+ -- (whichever way the x move
+ -- is shorter).
+ if x>=obs_x and x<=obs_x2 then
+  if abs(x-obs_x)<abs(x-obs_x2) then
+   -- push left
+   fix[1]=obs_x-x
+   if fix[1]>-0.5 then
+    fix[1]=-0.5
+   end
+  else
+   -- push right
+   fix[1]=obs_x2-x
+   if fix[1]<0.5 then
+    fix[1]=0.5
+   end
+  end
+ else
+  -- no collision found
+  return nil
+ end
+
+ -- correct the y, pushing the
+ -- point up or down (whichever
+ -- way the y move is shorter).
+ if y>=obs_y and y<=obs_y2 then
+  if abs(y-obs_y)<abs(y-obs_y2) then
+   -- push up
+   fix[2]=obs_y-y
+   if fix[2]>-0.5 then
+    fix[2]=-0.5
+   end
+  else
+   -- push down
+   fix[2]=obs_y2-y
+   if fix[2]<0.5 then
+    fix[2]=0.5
+   end
+  end
+ else
+  -- no collision found
+  return nil
+ end
+
+ -- correct the z, pushing the
+ -- point upwards in the air
+ -- when needed.
+ if z<=obs_z and z>=obs_z2 then
+  fix[3]=obs_z2-z
+  if fix[3]>-0.5 then
+   fix[3]=-0.5
+  end
+ else
+  -- no collision found
+  return nil
+ end
+ 
+ -- choose the x correction if
+ -- it has the shortest path
+ --if abs(fix[1])<abs(fix[2])
+ --and abs(fix[1])<abs(fix[3])
+ --then
+ -- fix[2],fix[3]=0,0
+ --end
+
+ -- choose the y correction if
+ -- it has the shortest path
+ --if abs(fix[2])<abs(fix[1])
+ --and abs(fix[2])<abs(fix[3])
+ --then
+ -- fix[1],fix[3]=0,0
+ --end
+ 
+ -- choose the z correction if
+ -- it has the shortest path
+ --if abs(fix[3])<abs(fix[1])
+ --and abs(fix[3])<abs(fix[2])
+ --then
+ -- fix[1],fix[2]=0,0
+ --end
+
+ return fix
 end
 -->8
 -- human info --
@@ -1632,8 +1757,6 @@ end
 -->8
 -- bone info --
 
--- todo: animate bone capture
-
 local sprts={
  {{colswap=nil},{27}},
  {{colswap=nil},{28}},
@@ -1681,13 +1804,16 @@ local function draw(inst)
  end
 end
 
-function create_bone(x,bottom_y,z)
+function create_bone(
+ x,
+ bottom_y,
+ z
+)
  local instance={
   x=x,
   y=bottom_y-7,
   z=z,
   floor_z=0,
-  dx=0,
   spr_aux=frames_per_sprite,
   spr_index=1,
   shad_col=5,
@@ -1726,6 +1852,189 @@ function create_bone(x,bottom_y,z)
     instance.z-9
    )
   end
+ end
+ 
+ return instance
+end
+-->8
+-- game over message info --
+
+-- todo: simplify this ugly code
+local function update(inst)
+ -- make the rectangle expand
+ local target_x=human.x-human_offset_x+3
+ local target_y=34
+ local target_x2=human.x-human_offset_x+124
+ local target_y2=144
+ local skip_anim=btn(❎) or btn(🅾️)
+
+ if not skip_anim
+ and abs(target_x-inst.x)>1
+ then
+  inst.x+=0.1*(target_x-inst.x)
+ else
+  inst.x=target_x
+ end
+
+ if not skip_anim
+ and abs(target_y-inst.y)>1
+ then
+  inst.y+=0.1*(target_y-inst.y)
+ else
+  inst.y=target_y
+ end
+
+ if not skip_anim
+ and abs(target_x2-inst.x2)>1
+ then
+  inst.x2+=0.1*(target_x2-inst.x2)
+ else
+  inst.x2=target_x2
+ end
+
+ if not skip_anim
+ and abs(target_y2-inst.y2)>1
+ then
+  inst.y2+=0.1*(target_y2-inst.y2)
+ else
+  inst.y2=target_y2
+ end
+
+ -- ensure text is shown once
+ -- the rectangle is expanded
+ -- to its target size, making
+ -- sure to make it appear
+ -- one character at a time
+ local show_text=inst.x==target_x
+  and inst.y==target_y
+  and inst.x2==target_x2
+  and inst.y2==target_y2
+ if show_text then
+  local all_text_shown=true
+  if skip_anim then
+   -- skip the text animation
+   -- and show all the text
+   -- directly
+   inst.texts_to_show_chars=1000
+  else
+   inst.texts_to_show_chars+=1
+  end
+  inst.texts_to_show={}
+  local aux_count=inst.texts_to_show_chars
+  for _,text in ipairs(inst.texts) do
+   inst.texts_to_show[#inst.texts_to_show+1]={text[1],""}
+   local aux_text=""
+   local new_aux_count=aux_count
+   for i=1,min(#text[2],aux_count) do
+    aux_text=aux_text..text[2][i]
+    new_aux_count-=1
+   end
+   inst.texts_to_show[#inst.texts_to_show][2]=aux_text
+   aux_count=new_aux_count
+   if aux_count==0 then
+    all_text_shown=false
+    break
+   end
+  end
+  if all_text_shown then
+   -- the animation for the
+   -- game over text is
+   -- finished, but the user
+   -- needs to release the
+   -- button first in case it
+   -- is pressed, otherwise
+   -- the tap to skip the
+   -- animation would also
+   -- restart the game
+   inst.finished=not (btn(❎) or btn(🅾️))
+  end
+ end
+ 
+ -- increment counter that will
+ -- be used to animate the
+ -- "press button to restart"
+ -- text
+ if inst.finished then
+  inst.counter+=1
+  if inst.counter>120 then
+   inst.counter=0
+  end
+ end
+end
+
+local function draw(inst)
+ rect(
+  inst.x,
+  inst.y,
+  inst.x2,
+  inst.y2,
+  2
+ )
+
+ if inst.texts_to_show!=nil then
+  local text_y=inst.y+5
+  for _,text in ipairs(inst.texts_to_show) do
+   print(
+    text[2],
+    inst.x+6,
+    text_y,
+    text[1]
+   )
+   text_y+=12
+  end
+ end
+ 
+ if inst.finished
+ and inst.counter>50
+ then
+  print(
+   "press button to restart",
+   inst.x+14,
+   inst.y+58,
+   7
+  )
+ end
+end
+
+function create_game_over_msg()
+ local function concat(a,b)
+  local result=a
+  for _=1,28-#a-#b do
+   result=result.."."
+  end
+  return result..b
+ end
+ 
+ local texts={
+  {7,concat("distance","1 x "..meters.." = "..meters)},
+  {15,concat("bones","10 x "..bones_count.." = "..(10*bones_count))},
+  {0,""},
+  {0,""},
+  {0,""},
+  {0,""},
+  {0,""},
+  {0,""},
+  {14,concat("total score",tostr(meters+10*bones_count))},
+ }
+ local instance={
+  x=human.x-human_offset_x+63,
+  y=89,
+  x2=human.x-human_offset_x+63,
+  y2=89,
+  texts=texts,
+  texts_to_show=nil,
+  texts_to_show_chars=0,
+  show_text=false,
+  finished=false,
+  counter=0,
+ }
+ 
+ instance._update=function()
+  update(instance)
+ end
+
+ instance._draw=function()
+  draw(instance)
  end
  
  return instance
@@ -1795,6 +2104,69 @@ aa111dd11056666554544544460dd064aaa88f8f8f8f8f8f8f8f8f8777878787778f8f8f44444444
 aa1dd110566665545445444446011064aaa8f8f8f8f8f8f8f8f8f887778787877788f8f844444444444444442242200daaaaaaaa44444444aaaaaaaaaaaaaaaa
 aa111056666554544544444444600644aaa88f8f8f8f8f8f8f8f8f8788877787778f8f8f444444444444444452200dd1aaaaaaaa54545454aaaaaaaaaaaaaaaa
 aa155666655454454444444444466444aaa88888888888888888888888888888888888884444444444444444000dd11daaaaaaaa45454545aaaaaaaaaaaaaaaa
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000000000aaaaaaaa000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000000aaaaaaaaaaaaaa000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000aaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000aaaaaaaaaaaaaaaaaaaa000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000aaaaaaaaaaaaaaaaaaaaaa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000aaaaaaaaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000aaaaaaaaaaaaaaaaaaaaaaaaaa000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000aaaaaaaaaaaaaaaaaaaaaaaaaa000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00aaaaaaaaaaaaaaaaaaaaaaaaaaaa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00aaaaaaaaaaaaaaaaaaaaaaaaaaaa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00aaaaaaaaaaaaaaaaaaaaaaaaaaaa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00aaaaaaaaaaaaaaaaaaaaaaaaaaaa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00aaaaaaaaaaaaaaaaaaaaaaaaaaaa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00aaaaaaaaaaaaaaaaaaaaaaaaaaaa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000aaaaaaaaaaaaaaaaaaaaaaaaaa000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000aaaaaaaaaaaaaaaaaaaaaaaaaa000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000aaaaaaaaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000aaaaaaaaaaaaaaaaaaaaaa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000aaaaaaaaaaaaaaaaaaaa000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000aaaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000000aaaaaaaaaaaaaa000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000000000aaaaaaaa000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __gff__
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000101010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000

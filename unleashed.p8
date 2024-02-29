@@ -11,14 +11,17 @@ __lua__
 
 function init(initial_state)
  state=initial_state
+ enter_transition=nil
 
  if initial_state=="intro" then
   intro_screen=create_intro_screen()
   return
- else
-  intro_screen=nil
+ elseif initial_state=="play" then
+  enter_transition=transition(0,0)
  end
  
+ exit_transition=nil
+ intro_screen=nil
  scroll_speed_deft=1
  scroll_speed=scroll_speed_deft
  gravity=0.35
@@ -28,6 +31,8 @@ function init(initial_state)
  dog_offset_x=48
  dog=create_dog(dog_offset_x,114)
  cam_shake=0
+ cam_x=0
+ cam_y=0
  cam_offset_x=0
  cam_offset_y=0
  buildings={}
@@ -39,7 +44,7 @@ function init(initial_state)
  real_meters=0
  meters=0
  game_over_msg=nil
- restart=false
+ restart_requested=false
 end
 
 function _init()
@@ -56,6 +61,24 @@ function _update60()
   intro_screen._update()
   return
  end
+ 
+ -- ensure that the exit
+ -- transition, if present,
+ -- is the only thing played
+ if exit_transition!=nil then
+  if exit_transition.finished then
+   exit_transition=nil
+   -- exit transition finished,
+   -- time to start the game
+   init("play")
+   _update60()
+  else
+   exit_transition.x=cam_x
+   exit_transition.y=cam_y
+   exit_transition._update()
+  end
+  return
+ end
 
  -- restart the game if needed
  if state=="game over"
@@ -69,13 +92,21 @@ function _update60()
   -- game doesn't start with
   -- the dog immediately
   -- jumping
-  restart=true
+  restart_requested=true
  end
- if restart
+
+ -- actually restart if needed
+ -- once the button is released
+ if restart_requested
  and not btn(❎)
  and not btn(🅾️)
  then
-  init("play")
+  -- still not a restart, just
+  -- the start of the exit
+  -- transition that will
+  -- eventually trigger a
+  -- restart
+  exit_transition=transition(cam_x,cam_y,true)
   return
  end
 
@@ -173,6 +204,7 @@ function _update60()
  -- add bones at random on the
  -- sidewalk
  if state=="play"
+ and enter_transition==nil
  and flr(rnd(200/scroll_speed))==1
  and #new_bones==0
  then
@@ -240,6 +272,7 @@ function _update60()
   -- not move
   local factor=abs(spd-scroll_speed)
   if factor!=0
+  and enter_transition==nil
   and flr(rnd(60/factor))==0
   then
    local nc_x=end_x+1
@@ -342,6 +375,23 @@ function _update60()
  if game_over_msg!=nil then
   game_over_msg._update()
  end
+ 
+ -- update camera position
+ cam_x=human.x-human_offset_x+cam_offset_x
+ cam_y=20+cam_offset_y
+ 
+ -- ensure that the enter
+ -- transition, if present,
+ -- is played
+ if enter_transition!=nil then
+  if enter_transition.finished then
+   enter_transition=nil
+  else
+   enter_transition.x=cam_x
+   enter_transition.y=cam_y
+   enter_transition._update()
+  end
+ end
 end
 
 function _draw()
@@ -352,9 +402,6 @@ function _draw()
   intro_screen._draw()
   return
  end
-
- local cam_x=human.x-human_offset_x+cam_offset_x
- local cam_y=20+cam_offset_y
  
  -- alter color palette to help
  -- make the game over message
@@ -497,6 +544,14 @@ function _draw()
   cam_y+4,
   15
  )
+ 
+ -- draw transitions
+ if enter_transition!=nil then
+  enter_transition._draw()
+ end
+ if exit_transition!=nil then
+  exit_transition._draw()
+ end
 end
 -->8
 -- dog info --
@@ -1578,6 +1633,66 @@ function collision(
 
  return fix
 end
+
+-- performs a simple transition
+-- to allow moving from one
+-- screen to another nicely
+function transition(x,y,exit)
+ local patterns={
+  0b1111111111111111.1,
+  0b0111011101110111.1,
+  0b0011001100110011.1,
+  0b0001000100010001.1,
+  0b0000000000000000.1,
+ }
+ 
+ local start=patterns[1]
+ if not exit then
+  local start=patterns[#patterns]
+ end
+ 
+ local instance={
+  x=x,
+  y=y,
+  counter=0,
+  current=start,
+  finished=false,
+ }
+
+ instance._update=function()
+  local i=flr(instance.counter/5)+1
+  if not exit then
+   -- the order for the
+   -- patterns is inverted
+   -- for enter transitions
+   i=#patterns-i+1
+  end
+  
+  if i>0 and i<=#patterns then
+   instance.current=patterns[i]
+   instance.counter+=1
+  else
+   instance.finished=true
+  end
+ end
+ 
+ instance._draw=function()
+  -- draw black vertical lines
+  fillp(instance.current)
+  rectfill(
+   instance.x,
+   instance.y,
+   instance.x+127,
+   instance.y+127,
+   0
+  )
+  
+  -- restore everything
+  fillp(0b0000000000000000)
+ end
+ 
+ return instance
+end
 -->8
 -- human info --
 
@@ -2177,6 +2292,21 @@ local patterns={
 }
 
 local function update(inst)
+ -- if the exit transition is
+ -- present, ensure that's the
+ -- only thing that updates
+ if inst.exit_transition!=nil then
+  inst.exit_transition._update()
+  if inst.exit_transition.finished then
+   inst.exit_transition=nil
+   -- exit transition finished,
+   -- time tostart the game
+   init("play")
+   _update60()
+  end
+  return
+ end
+
  local button_pressed=btn(❎) or btn(🅾️)
  local arrow_button_pressed=btn(⬆️) or btn(⬇️)
 
@@ -2210,7 +2340,12 @@ local function update(inst)
  if inst.action_requested=="start"
  and not button_pressed
  then
-  init("play")
+  if inst.exit_transition==nil then
+   -- the exit transition will
+   -- trigger the start of the
+   -- game
+   inst.exit_transition=transition(0,0,true)
+  end
   inst.action_requested=nil
   return
  end
@@ -2422,6 +2557,11 @@ local function draw(inst)
   print(msg,29,inst.author_y,6)
  end
  sspr(0,64,80,32,24,inst.logo_y,80,32)
+
+ -- exit transition
+ if inst.exit_transition!=nil then
+  inst.exit_transition._draw()
+ end
 end
 
 function create_intro_screen()
@@ -2452,6 +2592,7 @@ function create_intro_screen()
   finished=false,
   play_btn_selected=true,
   action_requested=nil,
+  exit_transition=nil,
  }
  
  instance._update=function()

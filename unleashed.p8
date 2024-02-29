@@ -2290,6 +2290,8 @@ local patterns={
  0b0100000000010000,
  0b1000000000100000,
 }
+local button_pressed=false
+local arrow_button_pressed=false
 
 local function update(inst)
  -- if the exit transition is
@@ -2307,8 +2309,8 @@ local function update(inst)
   return
  end
 
- local button_pressed=btn(❎) or btn(🅾️)
- local arrow_button_pressed=btn(⬆️) or btn(⬇️)
+ button_pressed=btn(❎) or btn(🅾️)
+ arrow_button_pressed=btn(⬆️) or btn(⬇️)
 
  -- start the game if requested
  if inst.menu_fully_shown
@@ -2523,9 +2525,14 @@ local function draw(inst)
    0
   )
   if inst.menu_fully_shown then
+   local selected_bg=2
+   if button_pressed then
+    selected_bg=14
+   end
+  
    -- draw play button
    if inst.play_btn_selected then
-    rectfill(30,50,98,62,2)
+    rectfill(30,50,98,62,selected_bg)
     rect(30,50,98,62,7)
    else
     rect(30,50,98,62,2)
@@ -2534,7 +2541,7 @@ local function draw(inst)
    
    -- draw menu button
    if not inst.play_btn_selected then
-    rectfill(30,67,98,79,2)
+    rectfill(30,67,98,79,selected_bg)
     rect(30,67,98,79,7)
    else
     rect(30,67,98,79,2)
@@ -2676,7 +2683,7 @@ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa00000000000000000000000000000000000000000000000
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa00000000000000000000000000000000000000000000000
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa00000000000000000000000000000000000000000000000
-aaaa0000000000000000000000000000000000000000000000000000000000000000000000aaaaaaa00000000000000000000000000000000000000000000000
+aaa00000000000000000000000000000000000000000000000000000000000000000000000aaaaaaa00000000000000000000000000000000000000000000000
 aaa000000000000000000000000000000000000000000000000000000000000000000000000aaaaaa00000000000000000000000000000000000000000000000
 aaa007700000777777777777700eee00eee00eee00eee00eee00eee007777777777777777000aaaaa00000000000000000000000000000000000000000000000
 aaa009900000999999999999900eee00eee00eee00eee00eee00eee0099999999999999997000aaaa00000000000000000000000000000000000000000000000

@@ -80,12 +80,14 @@ function _update60()
   end
   return
  end
+ 
+ local btn_pressed=btn(❎) or btn(🅾️)
 
  -- restart the game if needed
  if state=="game over"
  and game_over_msg!=nil
  and game_over_msg.finished
- and (btn(❎) or btn(🅾️))
+ and btn_pressed
  then
   -- schedule a restart for
   -- when the button is
@@ -99,8 +101,7 @@ function _update60()
  -- actually restart if needed
  -- once the button is released
  if restart_requested
- and not btn(❎)
- and not btn(🅾️)
+ and not btn_pressed
  then
   -- still not a restart, just
   -- the start of the exit
@@ -130,23 +131,23 @@ function _update60()
  if offset!=nil then
   -- shift dog and human
   dog.x+=offset
-  for _,p in ipairs(dog.leash.leash) do
+  for p in all(dog.leash.leash) do
    p.x+=offset
   end
   human.x+=offset
   
   -- shift buildings
-  for _,b in ipairs(buildings) do
+  for b in all(buildings) do
    b.x+=offset
   end
   
   -- shift obstacles
-  for _,o in ipairs(obstacles) do
+  for o in all(obstacles) do
    o.x+=offset
   end
   
   -- shift bones
-  for _,b in ipairs(bones) do
+  for b in all(bones) do
    b.x+=offset
   end
   
@@ -155,27 +156,22 @@ function _update60()
   end_x=human.x-human_offset_x+127
  end 
 
- -- create a new list of
- -- buildings to update the
- -- scenario if needed
- local new_buildings={}
- 
- -- add the existing buildings
- -- to the new list, but only
- -- if they are still within
- -- view
- local max_b_end_x=0
- for i=1,#buildings do
-  local b=buildings[i]
+ -- only keep the buildings
+ -- that are still within view
+ local max_b_end_x,bi=0,1
+ while bi<=#buildings do
+  local b=buildings[bi]
   local b_end_x=b.x+b.width-1
-  -- using a 64 pixels margin
+  -- using a 32 pixels margin
   -- in case the camera needs
   -- to go back, that way, the
   -- building will still be
   -- there
-  if b_end_x+64>=start_x then
-   new_buildings[#new_buildings+1]=b
+  if b_end_x+32>=start_x then
    max_b_end_x=max(max_b_end_x,b_end_x)
+   bi+=1
+  else
+   del(buildings,b)
   end
  end
  
@@ -183,23 +179,22 @@ function _update60()
  -- as needed to fill the gap
  while max_b_end_x<end_x do
   local nb=create_building(max_b_end_x+1,10)
-  new_buildings[#new_buildings+1]=nb
+  add(buildings,nb)
   max_b_end_x+=nb.width
  end
  
- buildings=new_buildings
+ -- todo: update buildings
+ -- to make them animate?
  
- -- todo: update buildings?
- 
- -- create new bone list
- local new_bones={}
- 
- -- add existing bones, but
- -- only if they are still
- -- within view
- for _,b in ipairs(bones) do
-  if b.x+7>=start_x then
-   new_bones[#new_bones+1]=b
+ -- remove sidewalk bones that
+ -- are out of view
+ local bi=1
+ while bi<=#bones do
+  local b=bones[bi]
+  if b.x+7<start_x then
+   del(bones,b)
+  else
+   bi+=1
   end
  end
  
@@ -208,7 +203,7 @@ function _update60()
  if state=="play"
  and enter_transition==nil
  and flr(rnd(200/scroll_speed))==1
- and #new_bones==0
+ and #bones==0
  then
   local bx=end_x+1
   local elev=flr(rnd(2))==0
@@ -217,17 +212,13 @@ function _update60()
    if elev then
     nb.z=-15
    end
-   new_bones[#new_bones+1]=nb
+   add(bones,nb)
    bx+=12
   end
  end
  
- -- replace the bones table with
- -- the new bones
- bones=new_bones
- 
  -- update bones
- for _,b in ipairs(bones) do
+ for b in all(bones) do
   b._update()
  end
  
@@ -235,20 +226,28 @@ function _update60()
  -- and add the existing
  -- ones, but only if they
  -- are still within view
- local new_obstacles={}
- local new_cars={}
- local new_car_ys={
+ local cars={}
+ local car_ys={
   [18]=1.2,
   [40]=1.3,
   [116]=-1.0,
   [131]=-0.9,
  }
- for i=1,#obstacles do
-  local o=obstacles[i]
+ local oi=1
+ while oi<=#obstacles do
+  local o=obstacles[oi]
   local o_end_x=o.x+o.width-1
-  if o.x<=end_x+1 and o_end_x>=start_x-1 then
+  if o.x<=end_x+1 and o_end_x>=start_x-33 then
+   -- obstacle within view
    if o.type=="car" then
-    new_cars[#new_cars+1]=o
+    -- cars will be in their
+    -- own list temporarily
+    -- because they need to be
+    -- sorted by lane before
+    -- getting added to the
+    -- list of obstacles
+    del(obstacles,o)
+    add(cars,o)
     -- make the lane unavailable
     -- for new cars in case
     -- this one is too close to
@@ -262,11 +261,17 @@ function _update60()
     or (o.speed>scroll_speed
      and o.x-o.width-18<=start_x)
     then
-     new_car_ys[o.y]=nil
+     car_ys[o.y]=nil
     end
    else
-    new_obstacles[#new_obstacles+1]=o
+    -- obstacle remains in the
+    -- list, let's get the next
+    -- one
+    oi+=1
    end
+  else
+   -- obstacle not within view
+   del(obstacles,o)
   end
  end
  
@@ -274,7 +279,7 @@ function _update60()
  -- at random
  
  -- create new cars at random
- for cy,spd in pairs(new_car_ys) do
+ for cy,spd in pairs(car_ys) do
   -- avoid adding cars when
   -- their speed matches the
   -- scrolling, as they woulld
@@ -289,47 +294,40 @@ function _update60()
     nc_x=start_x-32
    end
    local nc=create_car(nc_x,cy,spd)
-   new_cars[#new_cars+1]=nc
+   add(cars,nc)
   end
  end
  
- -- sort the cars by lane to
- -- ensure they are drawn in
+ -- add the cars sorted by lane
+ -- to ensure they are drawn in
  -- the right order
- local sorted_cars={}
- for _,cy in ipairs({18,40,116,131}) do
-  local remaining_new_cars={}
-  for _,c in ipairs(new_cars) do
+ for cy in all({18,40,116,131}) do
+  local remaining_cars={}
+  for c in all(cars) do
    if c.y==cy then
     -- car in the right lane,
     -- can be added right away
-    sorted_cars[#sorted_cars+1]=c
+    add(obstacles,c)
    else
     -- car not in the right
     -- lane, will be added
     -- later
-    remaining_new_cars[#remaining_new_cars+1]=c
+    add(remaining_cars,c)
    end
   end
-  new_cars=remaining_new_cars
+  cars=remaining_cars
  end
- 
- -- finally, add the updated
- -- list of cars to the obstacle
- -- list
- for _,c in ipairs(sorted_cars) do
-  new_obstacles[#new_obstacles+1]=c
- end
- 
- obstacles=new_obstacles
  
  -- update obstacles
- for _,o in ipairs(obstacles) do
+ for o in all(obstacles) do
   o._update()
  end
 
+ -- update human and dog,
+ -- must be in this order
+ -- because of obscure reasons
+ -- i don't remember
  human._update()
- 
  local last_dog_x=dog.x
  dog._update()
  
@@ -388,8 +386,10 @@ function _update60()
   end
  end
  
- -- once the game is over, make
- -- sure to show the game over
+ -- once the game is over and
+ -- the human has finished
+ -- catching the dog, make sure
+ -- to show the game over
  -- message
  if state=="game over"
  and abs(human.dx)<1
@@ -434,7 +434,9 @@ function _draw()
  
  -- alter color palette to help
  -- make the game over message
- -- visible
+ -- visible and to make the
+ -- game look different than
+ -- while playing
  if state=="game over"
  and game_over_msg!=nil
  then
@@ -445,52 +447,48 @@ function _draw()
  palt(0, false)
  palt(10, true)
 
- -- draw the different elements
+ -- draw map background
  camera(cam_x,cam_y)
  map()
  
  -- draw top cars
+ -- todo: do this on update()
  local sidewalk_obsts={}
  local bottom_cars={}
- for _,o in ipairs(obstacles) do
+ for o in all(obstacles) do
   if o.type=="car" then
    if o.speed>0 then
     o._draw()
    else
-    bottom_cars[#bottom_cars+1]=o
+    add(bottom_cars,o)
    end
   else
-    sidewalk_obsts[#sidewalk_obsts+1]=o
+    add(sidewalk_obsts,o)
   end
  end
  
  -- draw buildings
- for _,b in ipairs(buildings) do
+ for b in all(buildings) do
   b._draw()
  end
  
  -- todo: draw sidewalk
  -- obstacles behind dog
  
- -- draw sidewalk bones behind
- -- dog
- local foregr_bones={}
- for _,b in ipairs(bones) do
-  if dog.y+6>b.y+2 then
+ -- draw sidewalk bones
+ for b in all(bones) do
    b._draw()
-  else
-   foregr_bones[#foregr_bones+1]=b
-  end
  end
  
  -- draw bottom cars behind dog
+ -- todo: do this on update()
  local foregr_cars={}
- for _,c in ipairs(bottom_cars) do
+ for c in all(bottom_cars) do
   if dog.y+7>c.y+7
   then
    c._draw()
   else
-   foregr_cars[#foregr_cars+1]=c
+   add(foregr_cars,c)
   end
  end
  
@@ -498,20 +496,9 @@ function _draw()
  dog._draw()
  human._draw()
  
- -- todo: draw sidewalk
- -- obstacles in front of
- -- the dog
- 
- -- draw bottom bones that are
- -- on the foreground (i.e.,
- -- in front of the dog)
- for _,b in ipairs(foregr_bones) do
-  b._draw()
- end
- 
  -- draw bottom cars that are
  -- on the foreground
- for _,c in ipairs(foregr_cars) do
+ for c in all(foregr_cars) do
   c._draw()
  end
  
@@ -567,6 +554,9 @@ function _draw()
  )
  local bc_bg_color=2
  if bone_being_lost then
+  -- red background in the
+  -- bones counter while a
+  -- bone is being lost
   bc_bg_color=8
  end
  rectfill(
@@ -584,6 +574,9 @@ function _draw()
  local bc_offset_x=0
  local bc_offset_y=0
  if bone_being_lost then
+  -- shake effect on the bones
+  -- counter while a bone is
+  -- being lost
   bc_offset_x=cam_offset_x
   bc_offset_y=cam_offset_y
  end
@@ -594,11 +587,11 @@ function _draw()
   15
  )
  
- -- draw transitions
+ -- draw transitions over
+ -- everything else if needed
  if enter_transition!=nil then
   enter_transition._draw()
- end
- if exit_transition!=nil then
+ elseif exit_transition!=nil then
   exit_transition._draw()
  end
 end
@@ -707,7 +700,7 @@ function dog._update()
   -- sides
   local diff=abs(a-b)/2
   local offst=min(a,b)+diff
-  local div=diff*diff
+  local div=diff^2
   local spd=1-((dog.y-offst)^2)/div
   return 2.4*(0.25+spd)
  end
@@ -737,6 +730,12 @@ function dog._update()
  dog.y+=dog.dy
  dog.z+=dog.dz
  
+ -- dog doesn't enter the floor
+ if dog.z>=dog.floor_z then
+  dog.z=dog.floor_z
+  dog.dz=0
+ end
+ 
  -- apply gravity,unless the
  -- jump button is clicked and
  -- the dog is neither too high
@@ -754,16 +753,11 @@ function dog._update()
   end
  end
  
- -- dog doesn't enter the floor
- if dog.z>=dog.floor_z then
-  dog.z=dog.floor_z
-  dog.dz=0
- end
- 
  -- stabilise horizontal speed
  -- to ensure the dog
  -- eventually stops moving
- -- backwards
+ -- backwards after being
+ -- pushed in that direction
  if dog.dx<0 then
   dog.dx+=0.16*scroll_speed
   if dog.dx>=0 then
@@ -780,7 +774,7 @@ function dog._update()
  -- of the official lanes and
  -- stops moving vertically
  if dog.dy>0 then
-  for _,lane_y in ipairs({119,134}) do
+  for lane_y in all({119,134}) do
    if last_dog_y<lane_y
    and dog.y>=lane_y
    then
@@ -789,7 +783,7 @@ function dog._update()
    end
   end
  elseif dog.dy<0 then
-  for _,lane_y in ipairs({119,107}) do
+  for lane_y in all({119,107}) do
    if last_dog_y>lane_y
    and dog.y<=lane_y
    then
@@ -799,17 +793,20 @@ function dog._update()
   end
  end
 
+ -- look for collisions with
+ -- obstacles
  if state=="play" then
   dog.floor_z=0
   local cp={dog.x+6,dog.y+7,0}
-  for _,o in ipairs(obstacles) do
+  for o in all(obstacles) do
    if o.type!="car"
    or o.speed<0
    then
-    -- col returns the necessary
-    -- corrections to apply to
-    -- the dog when the point we
-    -- are checking is actually
+    -- col returns the
+    -- necessary corrections to
+    -- apply to the dog when
+    -- the dog point we are
+    -- checking is actually
     -- colliding
     local col=o._collision(
      cp[1],cp[2],cp[3]
@@ -835,10 +832,11 @@ function dog._update()
      elseif col[1]<0
      and last_dog_x<=o.x
      then
+      -- frontal collision
       if o.type=="car" then
        -- frontal car crash,
        -- dog will be pushed
-       -- back
+       -- back as a result
        sfx(1)
        dog.dx=min(
         -2,
@@ -854,13 +852,15 @@ function dog._update()
        -- move the dog back
        -- to avoid going
        -- through the obstacle
+       -- it is colliding with
        dog.x=col[1]
       end
      elseif col[2]!=0 then
-      -- side crash against,
-      -- the obstacle, the
-      -- dog will be moved
-      -- away from it
+      -- side crash against the
+      -- obstacle, the dog will
+      -- be moved away from it
+      -- (i.e., back to the
+      -- lane it came from)
       sfx(1)
       dog.y+=col[2]
       if col[2]>0 then
@@ -873,13 +873,16 @@ function dog._update()
       cam_shake=1
      end
      
-     -- if this was a crash,
-     -- lose a bone as a
-     -- punishment
+     -- if this collisiong was
+     -- a crash that resulted
+     -- in a camera shake, the
+     -- dog will lose a bone
+     -- as a punishment
      if cam_shake==1
      and bones_count>0
      then
       bones_count-=1
+      sfx(6)
 
       -- show the lost bone
       -- flying back from the
@@ -895,8 +898,8 @@ function dog._update()
        b.dx=-3.2
       end
       b.dz=-4
-      b.uses_physics=true
-      bones[#bones+1]=b
+      b.is_lost=true
+      add(bones,b)
       bone_being_lost=true
      end
      
@@ -912,23 +915,24 @@ function dog._update()
  -- bones that aren't taken
  if state=="play" then
   local nt_bones={}
-  -- take normal bones
-  for _,b in ipairs(bones) do
+  -- take the bones placed on
+  -- the sidewalk
+  for b in all(bones) do
    if not b.taken
-   and not b.uses_physics
+   and not b.is_lost
    then
-    nt_bones[#nt_bones+1]=b
+    add(nt_bones,b)
    end
   end
-  -- take bones placed on
+  -- take the bones placed on
   -- top of cars
-  for _,o in ipairs(obstacles) do
+  for o in all(obstacles) do
    if o.type=="car"
    and o.bone!=nil
    and not o.bone.taken
-   and not o.bone.uses_physics
+   and not o.bone.is_lost
    then
-    nt_bones[#nt_bones+1]=o.bone
+    add(nt_bones,o.bone)
    end
   end
   local cp={
@@ -936,7 +940,7 @@ function dog._update()
    dog.y+7,
    dog.z-2,
   }
-  for _,b in ipairs(nt_bones) do
+  for b in all(nt_bones) do
    local col=b._collision(
     cp[1],cp[2],cp[3]
    )
@@ -1167,7 +1171,7 @@ function create_building(x,y)
   for i=2,#ground do
    local new_gr_row={}
    for j=#ground[i],1,-1 do
-    new_gr_row[#new_gr_row+1]=-ground[i][j]
+    add(new_gr_row,-ground[i][j])
    end
    ground[i]=new_gr_row
   end
@@ -1182,7 +1186,6 @@ function create_building(x,y)
   offset=draw_sprts(roof,offset)
   offset=draw_sprts(facade,offset)
   offset=draw_sprts(ground,offset)
-  return offset
  end
  
  return instance
@@ -1348,7 +1351,7 @@ function leash._update()
     p.y+=v_diff+1
    end
    
-   new_leash[#new_leash+1]=p
+   add(new_leash,p)
   end
   
   -- finally update the leash
@@ -1433,7 +1436,7 @@ end
 -->8
 -- car info --
 
--- todo: moving wheels
+-- todo: animate wheels
 
 local function update(inst)
  -- reduce horizontal acc
@@ -1450,10 +1453,10 @@ local function update(inst)
  if stopped_car_lane!=inst.y
  and (state=="play"
   or inst.speed>0
-  or inst.x<human.x
-  or inst.x-24>dog.x
   or (inst.y==116 and dog.y!=119)
-  or (inst.y==131 and dog.y!=134))
+  or (inst.y==131 and dog.y!=134)
+  or inst.x<human.x
+  or inst.x-24>dog.x)
  then
   inst.x+=inst.speed
  else
@@ -1500,7 +1503,7 @@ function create_car(x,y,speed)
  -- change the car colors to
  -- make each car look somewhat
  -- unique
- local cs=nil
+ local cs={}
  local cs_rnd=flr(rnd(7))
  if cs_rnd==0 then
   cs={{11,8},{3,2}}
@@ -1515,15 +1518,6 @@ function create_car(x,y,speed)
  elseif cs_rnd==5 then
   cs={{11,7},{3,6}}
  end
- local car={
-  {colswap=cs},
-  {7,8,9,10},
-  {23,24,25,26},
- }
- if speed>0 then
-  car[2]={-10,-9,-8,-7}
-  car[3]={-26,-25,-24,-23}
- end
  
  instance._update=function()
   update(instance)
@@ -1531,13 +1525,20 @@ function create_car(x,y,speed)
 
  instance._draw=function()
   -- draw car
-  local offset={
-   x=instance.x,
-   y=instance.y,
-   z=0,
-  }
-  draw_sprts(car,offset)
-  
+  for s in all(cs) do
+   pal(s[1],s[2])
+  end
+  sspr(
+   56,0,
+   32,16,
+   instance.x,instance.y,
+   32,16,
+   instance.speed>0 -- flip h
+  )
+  for s in all(cs) do
+   pal(s[1],s[1])
+  end
+   
   -- draw bone if needed
   if instance.bone!=nil then
    instance.bone._draw()
@@ -1596,7 +1597,8 @@ end
 function draw_sprts(sprts,offset)
  local colswap=sprts[1].colswap
  if colswap~=nil then
-  for _,col in ipairs(colswap) do
+  for col in all(colswap) do
+   -- apply color swap
    pal(col[1],col[2])
   end
  end
@@ -1604,23 +1606,21 @@ function draw_sprts(sprts,offset)
  while row<#sprts-1 do
   while col<#sprts[row+2] do
    local sprite=sprts[row+2][col+1]
-   if sprite!=0 then
-    local flip_h=sprite<0
-    spr(
-     abs(sprite),
-     col*8+offset.x,
-     (row*8+offset.y)+offset.z,
-     1,1,
-     flip_h
-    )
-   end
+   spr(
+    abs(sprite),
+    col*8+offset.x,
+    (row*8+offset.y)+offset.z,
+    1,1,
+    sprite<0
+   )
    col+=1
   end
   row+=1
   col=0
  end
  if colswap~=nil then
-  for _,col in ipairs(colswap) do
+  for col in all(colswap) do
+   -- restore color after swap
    pal(col[1],col[1])
   end
  end
@@ -1656,15 +1656,11 @@ function collision(
   if abs(x-obs_x)<abs(x-obs_x2) then
    -- push left
    fix[1]=obs_x-x
-   if fix[1]>-0.5 then
-    fix[1]=-0.5
-   end
+   fix[1]=min(fix[1],-0.5)
   else
    -- push right
    fix[1]=obs_x2-x
-   if fix[1]<0.5 then
-    fix[1]=0.5
-   end
+   fix[1]=max(fix[1],0.5)
   end
  else
   -- no collision found
@@ -1678,15 +1674,11 @@ function collision(
   if abs(y-obs_y)<abs(y-obs_y2) then
    -- push up
    fix[2]=obs_y-y
-   if fix[2]>-0.5 then
-    fix[2]=-0.5
-   end
+   fix[2]=min(fix[2],-0.5)
   else
    -- push down
    fix[2]=obs_y2-y
-   if fix[2]<0.5 then
-    fix[2]=0.5
-   end
+   fix[2]=max(fix[2],0.5)
   end
  else
   -- no collision found
@@ -1698,9 +1690,7 @@ function collision(
  -- when needed.
  if z<=obs_z and z>=obs_z2 then
   fix[3]=obs_z2-z
-  if fix[3]>-0.5 then
-   fix[3]=-0.5
-  end
+  fix[3]=min(fix[3],-0.5)
  else
   -- no collision found
   return nil
@@ -1767,7 +1757,7 @@ function transition(x,y,exit)
    i=#patterns-i+1
   end
   
-  if i>0 and i<=#patterns then
+  if i>=1 and i<=#patterns then
    instance.current=patterns[i]
    instance.counter+=1
   else
@@ -1821,7 +1811,7 @@ local function update(inst)
  inst.z+=inst.dz
  
  if state=="play" then
-  -- follow the dog
+  -- follow the dog vertically
   inst.dy=(dog.y-inst.y-8)/8
  elseif state=="game over" then
   -- get next to the dog to
@@ -1845,7 +1835,7 @@ local function update(inst)
  local collided=false
  local cp={inst.x+4,inst.y+15,0}
  inst.floor_z=0
- for _,o in ipairs(obstacles) do
+ for o in all(obstacles) do
   if o.type!="car"
   or o.speed<0
   then
@@ -1864,9 +1854,7 @@ local function update(inst)
     -- he is if needed
     if col[3]<=inst.z then
      inst.z=col[3]
-     if inst.dz>0 then
-      inst.dz=0
-     end
+     inst.dz=min(inst.dz,0)
     end
     -- collision found, end
     -- the loop
@@ -1890,7 +1878,7 @@ local function update(inst)
    cp[2]+(10*inst.dy),
    0,
   }
-  for _,o in ipairs(obstacles) do
+  for o in all(obstacles) do
    if o.type!="car"
    or o.speed<0
    then
@@ -1905,7 +1893,10 @@ local function update(inst)
     and inst.dz==0
     then
      -- make the human jump
+     -- to avoid the obstacle
+     -- he is heading towards
      inst.dz=-jump_acc*1.2
+
      -- collision found, end
      -- the loop
      break
@@ -2005,14 +1996,15 @@ end
 -->8
 -- bone info --
 
-local sprts={
- {{colswap=nil},{27}},
- {{colswap=nil},{28}},
-}
+local sprts={27,28}
 local frames_per_sprite=18
 
 local function update(inst)
- if inst.uses_physics then
+ -- only lost bones use
+ -- physics, as they need to
+ -- fly and fall back down for
+ -- dramatic effect
+ if inst.is_lost then
   -- apply velocity deltas
   inst.x+=inst.dx
   inst.z+=inst.dz
@@ -2020,9 +2012,7 @@ local function update(inst)
   -- reduce dx over time
   if inst.dx<0 then
    inst.dx+=0.16*scroll_speed
-   if inst.dx>=0 then
-    inst.dx=0
-   end
+   inst.dx=min(inst.dx,0)
   end
   
   -- apply gravity, ensuring
@@ -2065,14 +2055,10 @@ local function draw(inst)
   )
  
   -- draw sprite
-  local offset={
-   x=inst.x,
-   y=inst.y,
-   z=inst.z,
-  }
-  draw_sprts(
+  spr(
    sprts[inst.spr_index],
-   offset
+   inst.x,
+   inst.y+inst.z
   )
  end
 end
@@ -2088,7 +2074,7 @@ function create_bone(
   z=z,
   dx=0,
   dz=0,
-  uses_physics=false,
+  is_lost=false,
   floor_z=0,
   spr_aux=frames_per_sprite,
   spr_index=1,
@@ -2141,7 +2127,9 @@ local function update(inst)
  -- press once the first line
  -- has already been shown (its
  -- animation won't be
- -- skippable)
+ -- skippable, but it will
+ -- last very very little, so
+ -- that's fine actually)
  local skip_anim=(btn(❎) or btn(🅾️))
   and inst.texts_to_show_chars>=28
   and inst.shake==0
@@ -2221,7 +2209,10 @@ local function update(inst)
      inst.texts_to_show_chars=28
      -- ensure the first line is
      -- shaken when shown (for
-     -- dramatic effect)
+     -- dramatic effect, as it
+     -- is the line that tells
+     -- the user about the game
+     -- over)
      inst.shake=1
     end
     
@@ -2237,10 +2228,12 @@ local function update(inst)
       inst.temp_pause=30
      end
      
-     -- make a sound for the
-     -- line that has just been
-     -- reached, except if it
-     -- is the first one
+     -- make a winning sound
+     -- for the line that has
+     -- just been reached,
+     -- except if it is the
+     -- first one, which
+     -- doesn't show a score
      if inst.texts_to_show_chars>28 then
       sfx(3)
      end
@@ -2257,13 +2250,12 @@ local function update(inst)
   for _,text in ipairs(inst.texts) do
    inst.texts_to_show[#inst.texts_to_show+1]={text[1],""}
    local aux_text=""
-   local new_aux_count=aux_count
-   for i=1,min(#text[2],aux_count) do
+   local i_max=min(#text[2],aux_count)
+   for i=1,i_max do
     aux_text=aux_text..text[2][i]
-    new_aux_count-=1
+    aux_count-=1
    end
    inst.texts_to_show[#inst.texts_to_show][2]=aux_text
-   aux_count=new_aux_count
    if aux_count==0 then
     all_text_shown=false
     break
@@ -2459,7 +2451,9 @@ local function update(inst)
  button_pressed=btn(❎) or btn(🅾️)
  arrow_button_pressed=btn(⬆️) or btn(⬇️)
 
- -- start the game if requested
+ -- request the start of the
+ -- game or the opening of the
+ -- pause menu
  if inst.menu_fully_shown
  and button_pressed
  then
@@ -2467,60 +2461,60 @@ local function update(inst)
   -- when the button is
   -- released
   if inst.play_btn_selected then
-   inst.action_requested="start"
+   if inst.action_requested!="start" then
+    inst.action_requested="start"
+    sfx(5)
+   end
   else
+   -- no sound here because
+   -- it'd be interrupted by
+   -- the menu opening anyway
    inst.action_requested="menu"
   end
  end
+
+ -- actually start the game
+ -- or open the pause menu
+ -- upon button release
+ if not button_pressed then
+  if inst.action_requested=="start" then
+   if inst.exit_transition==nil then
+    -- the exit transition will
+    -- trigger the start of the
+    -- game
+    inst.exit_transition=transition(0,0,true)
+   end
+   inst.action_requested=nil
+   return
+  elseif inst.action_requested=="menu" then
+   extcmd("pause")
+   inst.action_requested=nil
+   return
+  end
+ end
  
- -- change selected button if
- -- requested
+ -- request changing the
+ -- currently selected button
  if inst.menu_fully_shown
  and arrow_button_pressed
+ and inst.action_requested!="change button"
  then
   -- schedule the action for
   -- when the button is
   -- released
   inst.action_requested="change button"
- end
-
- -- actually start upon button
- -- release if needed
- if inst.action_requested=="start"
- and not button_pressed
- then
   sfx(5)
-  if inst.exit_transition==nil then
-   -- the exit transition will
-   -- trigger the start of the
-   -- game
-   inst.exit_transition=transition(0,0,true)
-  end
-  inst.action_requested=nil
-  return
- end
- 
- -- actually open menu upon
- -- button release if needed
- if inst.action_requested=="menu"
- and not button_pressed
- then
-  extcmd("pause")
-  inst.action_requested=nil
-  return
  end
  
  -- actually change selected
  -- button upon button release
- -- if needed
  if inst.action_requested=="change button"
  and not arrow_button_pressed
  then
-  sfx(5)
   inst.play_btn_selected=not inst.play_btn_selected
   inst.action_requested=nil
   return
- end
+ end 
 
  -- make the dog run and jump,
  -- or skip if needed
@@ -2563,15 +2557,18 @@ local function update(inst)
   if (inst.logo_dy<=0 and inst.logo_y<=18)
   or button_pressed
   then
-   -- logo animation finished
+   -- logo animation finished,
+   -- either the logo has
+   -- reached its target y (18)
+   -- after bouncing or the
+   -- animation has been
+   -- skipped
    inst.logo_y=18
    inst.logo_dy=0
+  elseif inst.logo_y<18 then
+   inst.logo_dy+=0.15
   else
-   if inst.logo_y<18 then
-    inst.logo_dy+=0.15
-   else
-    inst.logo_dy-=0.4
-   end
+   inst.logo_dy-=0.4
   end
  end
  
@@ -2599,7 +2596,7 @@ local function update(inst)
  -- animate it out
  if inst.show_author
  and (inst.pause==0
- or button_pressed)
+  or button_pressed)
  then
   if inst.author_y>30
   and not button_pressed
@@ -2608,9 +2605,6 @@ local function update(inst)
   else
    inst.author_y=30
    inst.show_author=false
-   if not button_pressed then
-    sfx(3)
-   end
   end
  end
  
@@ -2631,11 +2625,12 @@ local function update(inst)
  -- make it expand to its
  -- target size
  if inst.finished then
-  if inst.menu_bg_y2<inst.menu_bg_y2_target then
+  if inst.menu_bg_y2<94 then
    inst.menu_bg_y2+=3
-  else
-   inst.menu_bg_y2=inst.menu_bg_y2_target
+  elseif not inst.menu_fully_shown then
+   inst.menu_bg_y2=94
    inst.menu_fully_shown=true
+   sfx(3)
   end
  end
 
@@ -2670,13 +2665,15 @@ local function draw(inst)
  end
  fillp(pattern)
  rectfill(0,0,127,127,1)
+ 
+ -- restore default pattern
  fillp(0b0000000000000000)
   
  -- draw menu if needed
  if inst.finished then
   rectfill(
-   inst.menu_bg_x,
-   inst.menu_bg_y,
+   24,
+   30,
    inst.menu_bg_x2,
    inst.menu_bg_y2,
    0
@@ -2717,8 +2714,8 @@ local function draw(inst)
  -- logo and author text
  if inst.show_author then
   local msg="by ernestoyaquello"
-  print(msg,30,inst.author_y+1,0)
-  print(msg,29,inst.author_y,6)
+  print(msg,29,inst.author_y+1,0)
+  print(msg,28,inst.author_y,6)
  end
  sspr(0,64,80,24,24,inst.logo_y+6,80,24)
 
@@ -2744,11 +2741,8 @@ function create_intro_screen()
   bg_frame_aux=0,
   logo_y=-32,
   logo_dy=1,
-  menu_bg_x=24,
-  menu_bg_y=30,
   menu_bg_x2=103,
   menu_bg_y2=31,
-  menu_bg_y2_target=94,
   show_author=false,
   author_y=50,
   pause=0,
@@ -2765,6 +2759,40 @@ function create_intro_screen()
 
  instance._draw=function()
   draw(instance)
+ end
+ 
+ return instance
+end
+-->8
+-- scaffolding info --
+
+function create_scaffold(x,y)
+ local instance={
+  x=x,
+  y=y,
+  z=0,
+  width=(2+flr(rnd(15)))*13,
+  height=29,
+  type="scaffold",
+ }
+ 
+ instance._update=function()
+ end
+
+ instance._draw=function()
+  --todo
+ end
+
+ instance._collision=function(x,y,z)
+  return collision(
+   x,y,z,
+   instance.x,
+   instance.x+instance.width-1,
+   instance.y,
+   instance.y+5,
+   0,
+   -instance.height-5
+  )
  end
  
  return instance
@@ -3053,8 +3081,9 @@ __map__
 1010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010
 __sfx__
 0001000005010080100b0100f010140101b010230102e0100e000120001600016000130001400015000160001600017000180001800018000170001700017000170001600016000160000d0000d0000d0000d000
-aa0100002d253282432723323223212231c2231b22317223152130f2130e2130a2130721302213002030420300203022030120300203002030020300203002030020300203002030020300203002030020300203
+aa0100002d663286632766323653216431c6431b64317633156330f6330e6330a6330763302633006030460300603026030160300603006030060300603006030060300603006030060300603006030060300603
 a804000014730147301473014730147301473014730147300e7300e7300e7300e7300e7300e7300e7300e73008730087300873008730087300873008730087300273002730027300273002730027300273002730
 480200000e550125501455015550125500f550145501b5501f55022550235002b5002a5002e500305001650016500005000050000500005000050000500005000050000500005000050000500005000050000500
 ab0200000525305253042530324303243032430323302233022330222302223022230221302213022500225002251022510225102251022510225102251022510225102251022510225102251022510225102251
 0002000007030080300c0301103019030220302f03000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d60100002a66023060256601e0501f640180401a64012040146300a03007630030300063002600016000060000600006000060000600006000060000600006000060000600006000060000600006000060000600

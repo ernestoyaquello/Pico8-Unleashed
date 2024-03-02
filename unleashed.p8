@@ -37,7 +37,7 @@ function init(initial_state)
  cam_offset_y=0
  buildings={}
  bones={}
- cars={}
+ obstacles={}
  stopped_car_lane=nil
  bones_count=0
  bone_being_lost=false
@@ -140,9 +140,9 @@ function _update60()
    b.x+=offset
   end
   
-  -- shift cars
-  for _,c in ipairs(cars) do
-   c.x+=offset
+  -- shift obstacles
+  for _,o in ipairs(obstacles) do
+   o.x+=offset
   end
   
   -- shift bones
@@ -231,7 +231,11 @@ function _update60()
   b._update()
  end
  
- -- create new car list
+ -- create new obstacle list
+ -- and add the existing
+ -- ones, but only if they
+ -- are still within view
+ local new_obstacles={}
  local new_cars={}
  local new_car_ys={
   [18]=1.2,
@@ -239,34 +243,37 @@ function _update60()
   [116]=-1.0,
   [131]=-0.9,
  }
- 
- -- add existing cars, but
- -- only if they are still
- -- within view
- for i=1,#cars do
-  local c=cars[i]
-  local c_end_x=c.x+c.width-1
-  if c.x<=end_x+1 and c_end_x>=start_x-1 then
-   new_cars[#new_cars+1]=c
-   -- make the lane unavailable
-   -- for new cars in case
-   -- this one is too close to
-   -- where those new cars
-   -- would spawn
-   if (
-    (c.speed<0 
-     or c.speed<scroll_speed)
-    and c_end_x+c.width+18>=end_x
-   )
-   or (c.speed>scroll_speed
-    and c.x-c.width-18<=start_x)
-   then
-    new_car_ys[c.y]=nil
+ for i=1,#obstacles do
+  local o=obstacles[i]
+  local o_end_x=o.x+o.width-1
+  if o.x<=end_x+1 and o_end_x>=start_x-1 then
+   if o.type=="car" then
+    new_cars[#new_cars+1]=o
+    -- make the lane unavailable
+    -- for new cars in case
+    -- this one is too close to
+    -- where those new cars
+    -- would spawn
+    if (
+     (o.speed<0 
+      or o.speed<scroll_speed)
+     and o_end_x+o.width+18>=end_x
+    )
+    or (o.speed>scroll_speed
+     and o.x-o.width-18<=start_x)
+    then
+     new_car_ys[o.y]=nil
+    end
+   else
+    new_obstacles[#new_obstacles+1]=o
    end
   end
  end
  
- -- add new cars at random
+ -- todo: add new obstacles
+ -- at random
+ 
+ -- create new cars at random
  for cy,spd in pairs(new_car_ys) do
   -- avoid adding cars when
   -- their speed matches the
@@ -286,27 +293,39 @@ function _update60()
   end
  end
  
- -- replace the cars table with
- -- the new cars, ensuring they
- -- are added to the table so
- -- that they can be rendered
- -- in the right order
- cars={}
+ -- sort the cars by lane to
+ -- ensure they are drawn in
+ -- the right order
+ local sorted_cars={}
  for _,cy in ipairs({18,40,116,131}) do
-  local aux_new_cars={}
+  local remaining_new_cars={}
   for _,c in ipairs(new_cars) do
    if c.y==cy then
-    cars[#cars+1]=c
+    -- car in the right lane,
+    -- can be added right away
+    sorted_cars[#sorted_cars+1]=c
    else
-    aux_new_cars[#aux_new_cars+1]=c
+    -- car not in the right
+    -- lane, will be added
+    -- later
+    remaining_new_cars[#remaining_new_cars+1]=c
    end
   end
-  new_cars=aux_new_cars
+  new_cars=remaining_new_cars
  end
  
- -- update cars
- for _,c in ipairs(cars) do
-  c._update()
+ -- finally, add the updated
+ -- list of cars to the obstacle
+ -- list
+ for _,c in ipairs(sorted_cars) do
+  new_obstacles[#new_obstacles+1]=c
+ end
+ 
+ obstacles=new_obstacles
+ 
+ -- update obstacles
+ for _,o in ipairs(obstacles) do
+  o._update()
  end
 
  human._update()
@@ -431,12 +450,17 @@ function _draw()
  map()
  
  -- draw top cars
+ local sidewalk_obsts={}
  local bottom_cars={}
- for _,c in ipairs(cars) do
-  if c.speed>0 then
-   c._draw()
+ for _,o in ipairs(obstacles) do
+  if o.type=="car" then
+   if o.speed>0 then
+    o._draw()
+   else
+    bottom_cars[#bottom_cars+1]=o
+   end
   else
-   bottom_cars[#bottom_cars+1]=c
+    sidewalk_obsts[#sidewalk_obsts+1]=o
   end
  end
  
@@ -444,6 +468,9 @@ function _draw()
  for _,b in ipairs(buildings) do
   b._draw()
  end
+ 
+ -- todo: draw sidewalk
+ -- obstacles behind dog
  
  -- draw sidewalk bones behind
  -- dog
@@ -470,6 +497,10 @@ function _draw()
  -- draw dog and human
  dog._draw()
  human._draw()
+ 
+ -- todo: draw sidewalk
+ -- obstacles in front of
+ -- the dog
  
  -- draw bottom bones that are
  -- on the foreground (i.e.,
@@ -767,59 +798,69 @@ function dog._update()
    end
   end
  end
- 
- -- detect collisions with cars
+
  if state=="play" then
   dog.floor_z=0
   local cp={dog.x+6,dog.y+7,0}
-  for _,c in ipairs(cars) do
-   if c.speed<0 then
+  for _,o in ipairs(obstacles) do
+   if o.type!="car"
+   or o.speed<0
+   then
     -- col returns the necessary
     -- corrections to apply to
     -- the dog when the point we
     -- are checking is actually
     -- colliding
-    local col=c._collision(
+    local col=o._collision(
      cp[1],cp[2],cp[3]
     )
     if col!=nil then
      if col[3]!=0
      and dog.z<-1
      then
-      -- dog is above the car
-      -- or even on top of it,
-      -- meaning that the car
-      -- roof is now the floor
-      -- for the dog
+      -- dog is above the
+      -- obstacle or even on
+      -- top of it, meaning
+      -- that the obstacle
+      -- "roof" is now the
+      -- floor for the dog
       dog.floor_z=col[3]
  
       -- ensure the dog is on
       -- top and not inside
-      -- the car
+      -- the obstacle
       if dog.z>=col[3] then
        dog.z=col[3]
       end
      elseif col[1]<0
-     and last_dog_x<=c.x
+     and last_dog_x<=o.x
      then
-      -- frontal car crash,
-      -- dog will be pushed
-      -- back
-      sfx(1)
-      dog.dx=min(
-       -2,
-       1.8*(c.speed-scroll_speed)
-      )
-      -- slow down the car too
-      -- because of the crash
-      c.dx=2.5*scroll_speed
-      -- shake cam to add drama
-      -- to the crash
-      cam_shake=1
+      if o.type=="car" then
+       -- frontal car crash,
+       -- dog will be pushed
+       -- back
+       sfx(1)
+       dog.dx=min(
+        -2,
+        1.8*(o.speed-scroll_speed)
+       )
+       -- slow down the car too
+       -- because of the crash
+       o.dx=2.5*scroll_speed
+       -- shake cam to add drama
+       -- to the crash
+       cam_shake=1
+      else
+       -- move the dog back
+       -- to avoid going
+       -- through the obstacle
+       dog.x=col[1]
+      end
      elseif col[2]!=0 then
-      -- side car crash,
+      -- side crash against,
+      -- the obstacle, the
       -- dog will be moved
-      -- away from the car
+      -- away from it
       sfx(1)
       dog.y+=col[2]
       if col[2]>0 then
@@ -871,6 +912,7 @@ function dog._update()
  -- bones that aren't taken
  if state=="play" then
   local nt_bones={}
+  -- take normal bones
   for _,b in ipairs(bones) do
    if not b.taken
    and not b.uses_physics
@@ -878,12 +920,15 @@ function dog._update()
     nt_bones[#nt_bones+1]=b
    end
   end
-  for _,c in ipairs(cars) do
-   if c.bone!=nil
-   and not c.bone.taken
-   and not c.bone.uses_physics
+  -- take bones placed on
+  -- top of cars
+  for _,o in ipairs(obstacles) do
+   if o.type=="car"
+   and o.bone!=nil
+   and not o.bone.taken
+   and not o.bone.uses_physics
    then
-    nt_bones[#nt_bones+1]=c.bone
+    nt_bones[#nt_bones+1]=o.bone
    end
   end
   local cp={
@@ -1449,6 +1494,7 @@ function create_car(x,y,speed)
   width=4*8,
   height=2*8,
   bone=bone,
+  type="car",
  }
  
  -- change the car colors to
@@ -1792,27 +1838,30 @@ local function update(inst)
  end
  
  -- detect if the human is
- -- currently colliding with a
- -- car to make sure he is
- -- moved to be on top of it if
- -- needed
+ -- currently colliding with
+ -- an obstacle to make sure
+ -- he is moved to be on top
+ -- of it if needed
  local collided=false
  local cp={inst.x+4,inst.y+15,0}
  inst.floor_z=0
- for _,c in ipairs(cars) do
-  if c.speed<0 then
-   local col=c._collision(
+ for _,o in ipairs(obstacles) do
+  if o.type!="car"
+  or o.speed<0
+  then
+   local col=o._collision(
     cp[1],cp[2],cp[3]
    )
    if col!=nil and col[3]!=0 then
-    -- the car roof is now the
-    -- floor for the human
+    -- the obstacle "roof" is
+    -- now the  floor for the
+    -- human
     inst.floor_z=col[3]
 
     -- see if the human is
     -- or should be on top of
-    -- the car, ensuring it is
-    -- if needed
+    -- the obstacle, ensuring
+    -- he is if needed
     if col[3]<=inst.z then
      inst.z=col[3]
      if inst.dz>0 then
@@ -1828,8 +1877,11 @@ local function update(inst)
  end
  
  -- detect if the human will
- -- collide with the car soon
- -- to make him jump if needed
+ -- collide with an obstacle
+ -- soon to make him jump if
+ -- needed
+ -- todo: avoid jumping over
+ -- non-jumpable obstacles
  if not collided
  and state=="play"
  then
@@ -1838,9 +1890,11 @@ local function update(inst)
    cp[2]+(10*inst.dy),
    0,
   }
-  for _,c in ipairs(cars) do
-   if c.speed<0 then
-    col=c._collision(
+  for _,o in ipairs(obstacles) do
+   if o.type!="car"
+   or o.speed<0
+   then
+    col=o._collision(
      cp_future[1],
      cp_future[2],
      cp_future[3]

@@ -40,6 +40,7 @@ function init(initial_state)
  cars={}
  stopped_car_lane=nil
  bones_count=0
+ bone_being_lost=false
  meters_aux=0
  real_meters=0
  meters=0
@@ -340,6 +341,13 @@ function _update60()
    cam_shake=0
    cam_offset_x=0
    cam_offset_y=0
+   
+   -- the shake effect is over,
+   -- so the animation to show
+   -- on the bone counter while
+   -- a bone is being lost
+   -- should no longer be played
+   bone_being_lost=false
   end
  end
  
@@ -519,8 +527,6 @@ function _draw()
  )
  
  -- 2. draw bones count
- local bones_c_offset_x=0
- local bones_c_offset_y=0
  rect(
   m_end_x+4,
   cam_y+3,
@@ -528,22 +534,32 @@ function _draw()
   cam_y+11,
   0
  )
+ local bc_bg_color=2
+ if bone_being_lost then
+  bc_bg_color=8
+ end
  rectfill(
   m_end_x+3,
   cam_y+2,
   m_end_x+15+4*#bc_str,
   cam_y+10,
-  2
+  bc_bg_color
  )
  spr(
   29,
   m_end_x+5,
   cam_y+2
  )
+ local bc_offset_x=0
+ local bc_offset_y=0
+ if bone_being_lost then
+  bc_offset_x=cam_offset_x
+  bc_offset_y=cam_offset_y
+ end
  print(
   bc_str,
-  m_end_x+14,
-  cam_y+4,
+  m_end_x+14+bc_offset_x,
+  cam_y+4+bc_offset_y,
   15
  )
  
@@ -815,6 +831,34 @@ function dog._update()
       -- to the crash
       cam_shake=1
      end
+     
+     -- if this was a crash,
+     -- lose a bone as a
+     -- punishment
+     if cam_shake==1
+     and bones_count>0
+     then
+      bones_count-=1
+
+      -- show the lost bone
+      -- flying back from the
+      -- dog
+      local b=create_bone(
+       dog.x,
+       dog.y,
+       dog.z
+      )
+      if dog.dx<0 then
+       b.dx=dog.dx-0.3
+      else
+       b.dx=-3.2
+      end
+      b.dz=-4
+      b.uses_physics=true
+      bones[#bones+1]=b
+      bone_being_lost=true
+     end
+     
      -- collision found, end
      -- the loop
      break
@@ -828,13 +872,16 @@ function dog._update()
  if state=="play" then
   local nt_bones={}
   for _,b in ipairs(bones) do
-   if not b.taken then
+   if not b.taken
+   and not b.uses_physics
+   then
     nt_bones[#nt_bones+1]=b
    end
   end
   for _,c in ipairs(cars) do
    if c.bone!=nil
    and not c.bone.taken
+   and not c.bone.uses_physics
    then
     nt_bones[#nt_bones+1]=c.bone
    end
@@ -1911,6 +1958,31 @@ local sprts={
 local frames_per_sprite=18
 
 local function update(inst)
+ if inst.uses_physics then
+  -- apply velocity deltas
+  inst.x+=inst.dx
+  inst.z+=inst.dz
+  
+  -- reduce dx over time
+  if inst.dx<0 then
+   inst.dx+=0.16*scroll_speed
+   if inst.dx>=0 then
+    inst.dx=0
+   end
+  end
+  
+  -- apply gravity, ensuring
+  -- the bone doesn't go
+  -- through the floor
+  if inst.z>inst.floor_z then
+   inst.z=inst.floor_z
+   inst.dz=0
+   inst.taken=true
+  else
+   inst.dz+=gravity
+  end
+ end
+
  -- update sprites
  inst.spr_aux+=1
  if inst.spr_aux>#sprts*frames_per_sprite then
@@ -1960,6 +2032,9 @@ function create_bone(
   x=x,
   y=bottom_y-7,
   z=z,
+  dx=0,
+  dz=0,
+  uses_physics=false,
   floor_z=0,
   spr_aux=frames_per_sprite,
   spr_index=1,

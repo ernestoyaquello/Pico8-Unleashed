@@ -254,11 +254,11 @@ function _update60()
     -- where those new cars
     -- would spawn
     if (
-     (o.speed<0 
-      or o.speed<scroll_speed)
+     (o.dx<0 
+      or o.dx<scroll_speed)
      and o_end_x+o.width+18>=end_x
     )
-    or (o.speed>scroll_speed
+    or (o.dx>scroll_speed
      and o.x-o.width-18<=start_x)
     then
      car_ys[o.y]=nil
@@ -465,7 +465,7 @@ function _draw()
  local bottom_cars={}
  for o in all(obstacles) do
   if o.type=="car" then
-   if o.speed>0 then
+   if o.dx>0 then
     o._draw()
    else
     add(bottom_cars,o)
@@ -663,12 +663,11 @@ function dog._update()
  and abs(dog.z-dog.floor_z)<1
  and abs(dog.dz)<0.1
  and dog.dx>=0
- and dog.dy==0
  and jump_done
  and scroll_speed>0
  then
-  dog.dz=-jump_acc
   sfx(0)
+  dog.dz=-jump_acc
   jump_done=false
  end
 
@@ -681,21 +680,19 @@ function dog._update()
 
  -- move up and down if able
  if state=="play"
- and dog.dy==0
- and dog.z==dog.floor_z
- and dog.dz==0
+ and (dog.dy==0 or dog.z<dog.floor_z)
  and dog.dx>=0
  then
   if btn(⬆️)
   and can_move_up
-  and dog.y>107
+  and dog.y>=107.1
   and scroll_speed>0
   then
    dog.dy-=0.1
    can_move_up=false
   elseif btn(⬇️)
   and can_move_down
-  and dog.y<134
+  and dog.y<=133.9
   and scroll_speed>0
   then
    dog.dy+=0.1
@@ -716,7 +713,15 @@ function dog._update()
   local offst=min(a,b)+diff
   local div=diff^2
   local spd=1-((dog.y-offst)^2)/div
-  return 2.4*(0.25+spd)
+  
+  if dog.dz==0 then
+   return 2.4*(0.25+spd)
+  end
+  
+  -- slower vertical movement
+  -- when jumping, otherwise
+  -- the jump feels odd
+  return 1.3*(0.25+spd)
  end
  if dog.dy<0 then
   if dog.y>119 then
@@ -809,132 +814,145 @@ function dog._update()
 
  -- look for collisions with
  -- obstacles
- if state=="play" then
-  dog.floor_z=0
-  local cp={dog.x+6,dog.y+7,0}
-  for o in all(obstacles) do
-   if o.type!="car"
-   or o.speed<0
-   then
-    -- col returns the
-    -- necessary corrections to
-    -- apply to the dog when
-    -- the dog point we are
-    -- checking is actually
-    -- colliding
-    local col=o._collision(
-     cp[1],cp[2],cp[3]
-    )
-    if col!=nil then
+ dog.floor_z=0
+ local cp={dog.x+6,dog.y+7,0}
+ for o in all(obstacles) do
+  if o.type=="scaffold"
+  or o.dx<0
+  then
+   -- col returns the
+   -- necessary corrections to
+   -- apply to the dog when
+   -- the dog point we are
+   -- checking is actually
+   -- colliding
+   local col=o._collision(
+    cp[1],cp[2],cp[3]
+   )
+   if col!=nil then
+    local dog_moved=false
     
-     -- potential successful
-     -- jump over obstacle
-     if col[3]!=0
-     and dog.z<-2
-     and (dog.z-4<=col[3]
-      or last_dog_z<=col[3])
-     then
-      -- dog is above the
-      -- obstacle or even on
-      -- top of it, meaning
-      -- that the obstacle
-      -- "roof" is now the
-      -- floor for the dog
-      dog.floor_z=col[3]
- 
-      -- ensure the dog is on
-      -- top and not inside
-      -- the obstacle
-      if dog.z>=col[3] then
-       dog.z=col[3]
-      end
-     
-     -- potential frontal
-     -- collision
-     elseif col[1]<0
-     and last_dog_x-dog.x-1<=col[1]
-     then
-      if o.type=="car" then
-       -- frontal car crash,
-       -- dog will be pushed
-       -- back as a result
-       sfx(1)
-       dog.dx=min(
-        -2,
-        1.8*(o.speed-scroll_speed)
-       )
-       -- slow down the car too
-       -- because of the crash
-       o.dx=2.5*scroll_speed
-       -- shake cam to add drama
-       -- to the crash
-       cam_shake=1
-      else
-       -- move the dog back
-       -- to avoid going
-       -- through the obstacle
-       -- it is colliding with
-       dog.x+=col[1]
-      end
-      
-     -- potential side
-     -- collision
-     elseif col[2]!=0
-     and dog.dy!=0
-     then
-      -- side crash against the
-      -- obstacle, the dog will
-      -- be moved away from it
-      -- (i.e., back to the
-      -- lane it came from)
+    -- potential frontal
+    -- collision
+    if col[1]<0
+    and last_dog_x-1<=dog.x+col[1]-o.dx
+    and dog.z>col[3]
+    -- avoid crashes with the
+    -- car window
+    and (o.type!="car"
+     or last_dog_x-1<=o.x-o.dx)
+    then
+     if o.dx<0 then
+      -- frontal crash with a
+      -- moving obstacle, the
+      -- dog will be pushed
+      -- back as a result
       sfx(1)
-      dog.y+=col[2]
-      dog.y=max(dog.y,107)
-      dog.y=min(dog.y,134)
-      if col[2]>0 and dog.y<133.9 then
-       dog.dy=0.1
-      elseif col[2]<0 and dog.y>107.1 then
-       dog.dy=-0.1
-      end
-      -- shake cam to add drama
-      -- to the collision
-      cam_shake=1
-     end
-     
-     -- if this collisiong was
-     -- a crash that resulted
-     -- in a camera shake, the
-     -- dog will lose a bone
-     -- as a punishment
-     if cam_shake==1
-     and bones_count>0
-     then
-      bones_count-=1
-      sfx(6)
-
-      -- show the lost bone
-      -- flying back from the
-      -- dog
-      local b=create_bone(
-       dog.x,
-       dog.y,
-       dog.z
+      dog.dx=min(
+       -2,
+       1.8*(o.dx-scroll_speed)
       )
-      if dog.dx<0 then
-       b.dx=dog.dx-0.3
-      else
-       b.dx=-3.2
-      end
-      b.dz=-4
-      b.is_lost=true
-      add(bones,b)
-      bone_being_lost=true
+      dog.dz=-1
+      
+      -- slow down the obstacle
+      -- too because of the
+      -- crash
+      o.dx2=2.5*scroll_speed
+      
+      -- shake cam to add drama
+      -- to the crash
+      cam_shake=1
+      dog_moved=true
+     else
+      -- move the dog back
+      -- to avoid going
+      -- through the static
+      -- obstacle it is
+      -- colliding with
+      dog.x+=col[1]
+      dog_moved=true
      end
      
-     -- collision found, end
-     -- the loop
-     break
+    -- potential side
+    -- collision
+    elseif ((col[2]<0
+     and last_dog_y-1<=dog.y+col[2])
+      or (col[2]>0
+       and last_dog_y+1>=dog.y+col[2]))
+    and dog.z>col[3]
+    then
+     -- side crash against the
+     -- obstacle, the dog will
+     -- be moved away from it
+     -- (i.e., back to the
+     -- lane it came from)
+     sfx(1)
+     dog.y+=col[2]
+     dog.y=min(max(dog.y,107),134)
+     if col[2]>0 then
+      dog.dy=0.1
+     else
+      dog.dy=-0.1
+     end
+     -- shake cam to add drama
+     -- to the collision
+     cam_shake=1
+     dog_moved=true
+    
+    -- potential backwards
+    -- collision
+    elseif col[1]>0
+    and last_dog_x+1>=dog.x-col[1]+o.dx
+    and dog.z>col[3]
+    then
+     dog.x+=col[1]+4
+     dog.dx=0
+     dog_moved=true
     end
+    
+    -- dog might be on top of
+    -- an obstacle or simply
+    -- jumping over it
+    if col[3]!=0
+    and not dog_moved
+    then
+     dog.floor_z=col[3]
+     dog.z=min(dog.z,col[3])
+    end
+    
+    -- if this collision was
+    -- a crash that resulted
+    -- in a camera shake, the
+    -- dog will lose a bone
+    -- as a punishment
+    if cam_shake==1
+    and bones_count>0
+    then
+     bones_count-=1
+     sfx(6)
+
+     -- show the lost bone
+     -- flying back from the
+     -- dog
+     local b=create_bone(
+      dog.x,
+      dog.y,
+      dog.z
+     )
+     if dog.dx<0 then
+      b.dx=dog.dx-0.25
+     else
+      b.dx=-3.2
+     end
+     b.dz=-4
+     b.is_lost=true
+     add(bones,b)
+     bone_being_lost=true
+    end
+    
+    -- collision found, end
+    -- the loop
+    break
    end
   end
  end
@@ -979,6 +997,12 @@ function dog._update()
     break
    end
   end
+ end
+ 
+ -- avoid flickering
+ if last_dog_x==dog.x then
+  dog.x=flr(dog.x)
+   +(human.x-flr(human.x))
  end
  
  -- update the dog sprite
@@ -1295,6 +1319,7 @@ function leash._update()
    local p=leash.leash[i]
    
    -- update point position
+   p.x+=-(scroll_speed+dog.dx)
    p.y+=p.dy
    p.z+=p.dz
    
@@ -1428,7 +1453,7 @@ function leash._draw()
   -- draw leash
   line(
    human.x+8,human.y+human.z+13,
-   dog.x+4,dog.y+6,
+   dog.x+4,dog.y+dog.z+6,
    2
   )
  end
@@ -1468,9 +1493,9 @@ end
 
 local function update(inst)
  -- reduce horizontal acc
- inst.dx/=1.3
- if abs(inst.dx)<0.001 then
-  inst.dx=0
+ inst.dx2/=1.3
+ if abs(inst.dx2)<0.001 then
+  inst.dx2=0
  end
  
  -- apply scroll speed to car,
@@ -1480,17 +1505,17 @@ local function update(inst)
  -- while the game is over)
  if stopped_car_lane!=inst.y
  and (state=="play"
-  or inst.speed>0
+  or inst.dx>0
   or (inst.y==116 and dog.y!=119)
   or (inst.y==131 and dog.y!=134)
   or inst.x<human.x
   or inst.x-24>dog.x)
  then
-  inst.x+=inst.speed
+  inst.x+=inst.dx
  else
   stopped_car_lane=inst.y
  end
- inst.x+=inst.dx
+ inst.x+=inst.dx2
  
  -- update bone if needed
  if inst.bone!=nil then
@@ -1520,8 +1545,8 @@ function create_car(x,y,speed)
   x=x,
   y=y,
   z=0,
-  speed=speed,
-  dx=0,
+  dx=speed,
+  dx2=0,
   width=4*8,
   height=2*8,
   bone=bone,
@@ -1561,7 +1586,7 @@ function create_car(x,y,speed)
    32,16,
    instance.x,instance.y,
    32,16,
-   instance.speed>0 -- flip h
+   instance.dx>0 -- flip h
   )
   for s in all(cs) do
    pal(s[1],s[1])
@@ -1576,37 +1601,26 @@ function create_car(x,y,speed)
  instance._collision=function(x,y,z)
   local col=collision(
    x,y,z,
-   instance.x,
    instance.x+11,
+   instance.x+24,
+   instance.y+7,
+   instance.y+instance.height-1,
+   0,
+   -7
+  )
+  if col!=nil then
+   return col
+  end
+  
+  return collision(
+   x,y,z,
+   instance.x,
+   instance.x+instance.width+2,
    instance.y+7,
    instance.y+instance.height-1,
    0,
    -4
   )
-  if col==nil then
-   col=collision(
-    x,y,z,
-    instance.x+11,
-    instance.x+24,
-    instance.y+7,
-    instance.y+instance.height-1,
-    0,
-    -7
-   )
-  end
-  if col==nil then
-   col=collision(
-    x,y,z,
-    instance.x+24,
-    instance.x+instance.width,
-    instance.y+7,
-    instance.y+instance.height-1,
-    0,
-    -4
-   )
-  end
-  
-  return col
  end
  
  return instance
@@ -1820,7 +1834,7 @@ local function update(inst)
  elseif state=="game over" then
   -- get next to the dog to
   -- hold it by the leash
-  inst.dx=(dog.x-inst.x-11)/5
+  inst.dx=(dog.x-inst.x-11)/12
   inst.dy=(dog.y-inst.y-8)/5
  end
  
@@ -1836,30 +1850,44 @@ local function update(inst)
  -- an obstacle to make sure
  -- he is moved to be on top
  -- of it if needed
- local collided=false
- local cp={inst.x+4,inst.y+15,0}
  inst.floor_z=0
+ local collided=false
+ local cp={inst.x+5,inst.y+15,0}
  for o in all(obstacles) do
-  if o.type!="car"
-  or o.speed<0
+  if o.type=="scaffold"
+  or o.dx<0
   then
-   local col=o._collision(
-    cp[1],cp[2],cp[3]
-   )
-   if col!=nil and col[3]!=0 then
-    -- the obstacle "roof" is
-    -- now the  floor for the
-    -- human
-    inst.floor_z=col[3]
+   local col=nil
+   if o.type!="scaffold" then
+    col=o._collision(
+     cp[1],cp[2],cp[3]
+    )
+   else
+    col=o._collision(
+     cp[1],cp[2]-2,cp[3]
+    )
+   end
+   if col!=nil then
+    if o.type!="scaffold" then
+     -- the obstacle "roof" is
+     -- now the  floor for the
+     -- human
+     inst.floor_z=col[3]
 
-    -- see if the human is
-    -- or should be on top of
-    -- the obstacle, ensuring
-    -- he is if needed
-    if col[3]<=inst.z then
-     inst.z=col[3]
-     inst.dz=min(inst.dz,0)
+     -- see if the human is
+     -- or should be on top of
+     -- the obstacle, ensuring
+     -- he is if needed
+     if col[3]<=inst.z then
+      inst.z=col[3]
+      inst.dz=min(inst.dz,0)
+     end
+    else
+     -- avoid trespassing
+     -- inside the scaffold
+     inst.y+=col[2]
     end
+
     -- collision found, end
     -- the loop
     collided=true
@@ -1872,8 +1900,6 @@ local function update(inst)
  -- collide with an obstacle
  -- soon to make him jump if
  -- needed
- -- todo: avoid jumping over
- -- non-jumpable obstacles
  if not collided
  and state=="play"
  then
@@ -1883,9 +1909,7 @@ local function update(inst)
    0,
   }
   for o in all(obstacles) do
-   if o.type!="car"
-   or o.speed<0
-   then
+   if o.dx<0 then
     col=o._collision(
      cp_future[1],
      cp_future[2],
@@ -2239,10 +2263,7 @@ local function update(inst)
      -- first one, which
      -- doesn't show a score
      if inst.texts_to_show_chars>28 then
-      -- todo: use another sound
-      -- that isn't the bone
-      -- capture one
-      sfx(3)
+      sfx(2)
      end
     end
    end
@@ -2392,7 +2413,7 @@ function create_game_over_msg()
 
  local texts={
   {13, "    you've been caught!     "},
-  {6,concat("distance","1 x "..meters.." = "..meters)},
+  {7,concat("distance","1 x "..meters.." = "..meters)},
   {15,concat("bones","10 x "..bones_count.." = "..(10*bones_count))},
   {14,concat("total score",tostr(meters+10*bones_count))},
   {14,concat("personal best",tostr(dget(0)))},
@@ -2776,18 +2797,12 @@ end
 function create_scaffold(x,y)
  -- define number of scaffolds
  local num_blocks=2+flr(rnd(5))
- 
- -- define tools on the shelves
- local tools={}
- for _=1,num_blocks do
-  add(tools,flr(rnd(12)))
- end
-
  local instance={
   x=x,
   y=y,
   z=0,
-  width=32+num_blocks*13,
+  dx=0,
+  width=32+num_blocks*12,
   height=25,
   tools=tools,
   type="scaffold",
@@ -2802,48 +2817,39 @@ function create_scaffold(x,y)
   
   -- draw scaffolding blocks
   local x=instance.x+16
-  local skipped=false
   for i=1,num_blocks do
    sspr(
     0,
-    97,
+    96,
     13,
-    31,
+    32,
     x,
     instance.y-15
    )
-   if instance.tools[i]<=3 then
-    spr(194+instance.tools[i],x,instance.y-18)
-   end
-   x+=13
+   x+=12
    
-   -- stop the loop if the next
+   -- stop drawing if the next
    -- block is off screen
    if x>cam_x+128+scroll_speed then
-    skipped=true
-    break
+    return
    end
   end
   
   -- if we have drawn all the
   -- blocks, also draw the
   -- last diversion sign
-  if not skipped then
-   spr(242,x+8,instance.y+6)
-  end
+  spr(242,x+8,instance.y+6,1,1,true)
  end
 
  instance._collision=function(x,y,z)
   return collision(
    x,y,z,
    instance.x+14,
-   instance.x+instance.width-15,
-   instance.y+13,
-   instance.y+18,
+   instance.x+instance.width-12,
+   instance.y+11,
+   instance.y+16,
    0,
-   -- extra z to stop the dog
-   -- from jumping on top
-   -instance.height-5
+   -instance.height
   )
  end
  
@@ -2946,14 +2952,14 @@ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-aaaaaaaaaaaaaaaaaaa9aaaaaaaaaaaaaaaa2aaaaaaaaaaa00000000000000000000000000000000000000000000000000000000000000000000000000000000
-5555555555555aaaaa990aaaaaaaaaaaaaa222aaaaaaaaaa00000000000000000000000000000000000000000000000000000000000000000000000000000000
-5000500050005aaaa44990aaaaaaaaaaaa222ddaaaaaaaaa00000000000000000000000000000000000000000000000000000000000000000000000000000000
-5555555555555aaa54449995555555555222ddd55555555500000000000000000000000000000000000000000000000000000000000000000000000000000000
-5555555555555aaa5444491050005000512dddd05000500000000000000000000000000000000000000000000000000000000000000000000000000000000000
-5000500050005aaa5544411155555545111ddd555555655500000000000000000000000000000000000000000000000000000000000000000000000000000000
-5555555555555aaa5554411155565455111dd5555444665500000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000000000aaa5005411150006000111d50005000600000000000000000000000000000000000000000000000000000000000000000000000000000000000
+5aaaaaaaaaaa5aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+5555555555555aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+5000500050005aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+5aaa55555aaa5aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+5aaa55555aaa5aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0aaa50005aaa0aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0555555555550aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000000aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0aaa0aaa0aaa0aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0aaa0aaa0aaa0aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0aaa0aaa0aaa0aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -2961,22 +2967,22 @@ aaaaaaaaaaaaaaaaaaa9aaaaaaaaaaaaaaaa2aaaaaaaaaaa00000000000000000000000000000000
 0aaa0aaa0aaa0aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0555055505550aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0000000000000aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0555055505550aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0555055505550aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000000000aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0aaa05550aaa0aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0aaa05550aaa0aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0aaa00000aaa0aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0555055505550aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0000000000000aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0aaa0aaa0aaa0aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-9aaa9aaa9aaa9aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 9aaa9aaa9aaa9aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 92aa9aaa9aa69aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+92aa9aaa9aa69aaa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 9222926696669aaaaa9999aa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-9288987797769aaaa990099a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-9288988797769aaaa990999a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-9250905095069aaaa999099a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0205050500560aaaaa9999aa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-8822026606677aaaaa0aa0aa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-8888887777777aaaa0aaaa0a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+9228987797669aaaa999099a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+9228988797669aaaa990999a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+9220905095669aaaa990099a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0825050500670aaaaa9999aa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+8882026606777aaaaa6aa6aa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+8888887777777aaaa600006a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 8888888777777aaaaaaaaaaa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __label__
 11dd11dd116666666666666611dd11dd11dd11dd11dd11dd11dd11dd11dd11dd116666666666666611dd11dd11dd11dd11dd11dd11dd11dd11dd11dd11666666
@@ -3134,7 +3140,7 @@ __map__
 __sfx__
 0001000005010080100b0100f010140101b010230102e0100e000120001600016000130001400015000160001600017000180001800018000170001700017000170001600016000160000d0000d0000d0000d000
 aa0100002d663286632766323653216431c6431b64317633156330f6330e6330a6330763302633006030460300603026030160300603006030060300603006030060300603006030060300603006030060300603
-a804000014730147301473014730147301473014730147300e7300e7300e7300e7300e7300e7300e7300e73008730087300873008730087300873008730087300273002730027300273002730027300273002730
+490200002105025050260502605025050220502005014050180501d05025050320503c0503c0503c0502700027000080000800008000080000800008000080000200002000020000200002000020000200002000
 480200000e550125501455015550125500f550145501b5501f55022550235002b5002a5002e500305001650016500005000050000500005000050000500005000050000500005000050000500005000050000500
 ab0200000525305253042530324303243032430323302233022330222302223022230221302213022500225002251022510225102251022510225102251022510225102251022510225102251022510225102251
 0002000007030080300c0301103019030220302f03000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000

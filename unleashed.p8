@@ -38,6 +38,7 @@ function init(initial_state)
  buildings={}
  bones={}
  obstacles={}
+ to_render={}
  stopped_car_lane=nil
  bones_count=0
  bone_being_lost=false
@@ -144,9 +145,12 @@ function _update60()
   -- shift obstacles
   for o in all(obstacles) do
    o.x+=offset
+   if o.bone!=nil then
+    o.bone.x+=offset
+   end
   end
   
-  -- shift bones
+  -- shift sidewalk bones
   for b in all(bones) do
    b.x+=offset
   end
@@ -154,7 +158,9 @@ function _update60()
   -- shift aux variables
   start_x=human.x-human_offset_x
   end_x=human.x-human_offset_x+127
- end 
+ end
+ 
+ to_render={}
 
  -- only keep the buildings
  -- that are still within view
@@ -168,6 +174,7 @@ function _update60()
   -- building will still be
   -- there
   if b_end_x+32>=start_x then
+   add(to_render,b)
    max_b_end_x=max(max_b_end_x,b_end_x)
    bi+=1
   else
@@ -194,6 +201,7 @@ function _update60()
   if b.x+7<start_x then
    del(bones,b)
   else
+   add(to_render,b)
    bi+=1
   end
  end
@@ -264,9 +272,12 @@ function _update60()
      car_ys[o.y]=nil
     end
    else
-    -- obstacle remains in the
-    -- list, let's get the next
-    -- one
+    -- keep obstacle in list
+    if o_end_x>=start_x
+    and o.x<=end_x
+    then
+     add(to_render,o)
+    end
     oi+=1
    end
   else
@@ -282,7 +293,7 @@ function _update60()
  and enter_transition==nil
  and #obstacles==0
  then
-  local s=create_scaffold(end_x,101)
+  local s=create_scaffold(end_x+1,101)
   add(obstacles,s)
  end
  
@@ -308,7 +319,12 @@ function _update60()
  
  -- add the cars sorted by lane
  -- to ensure they are drawn in
- -- the right order
+ -- the right order, making
+ -- sure to also add the dog
+ -- and the human in the right
+ -- rendering spot
+ local dog_added=false
+ local human_added=false
  for cy in all({18,40,116,131}) do
   local remaining_cars={}
   for c in all(cars) do
@@ -316,6 +332,31 @@ function _update60()
     -- car in the right lane,
     -- can be added right away
     add(obstacles,c)
+    if c.dx>0 then
+     -- top car, first thing
+     -- to render, as it will
+     -- be behind the buildings
+     add(to_render,c,1)
+    else
+     -- bottom car, might or
+     -- might not be in front
+     -- of the dog and the
+     -- human
+     if not dog_added
+     and dog.y<=c.y
+     then
+      add(to_render,dog)
+      dog_added=true
+     end
+     if not human_added
+     and human.y+7<=c.y
+     then
+      add(to_render,human)
+      human_added=true
+     end
+  
+     add(to_render,c)
+    end
    else
     -- car not in the right
     -- lane, will be added
@@ -326,6 +367,17 @@ function _update60()
   cars=remaining_cars
  end
  
+ -- make sure the dog and the
+ -- human are added for
+ -- rendering
+ if dog.y+7>human.y+15 then
+  if (not human_added) add(to_render,human)
+  if (not dog_added) add(to_render,dog)
+ else
+  if (not dog_added) add(to_render,dog)
+  if (not human_added) add(to_render,human)
+ end
+ 
  -- update obstacles
  for o in all(obstacles) do
   o._update()
@@ -333,8 +385,6 @@ function _update60()
 
  -- update human and dog,
  -- must be in this order
- -- because of obscure reasons
- -- i don't remember
  human._update()
  local last_dog_x=dog.x
  dog._update()
@@ -459,60 +509,9 @@ function _draw()
  camera(cam_x,cam_y)
  map()
  
- -- draw top cars
- -- todo: do this on update()
- local sidewalk_obsts={}
- local bottom_cars={}
- for o in all(obstacles) do
-  if o.type=="car" then
-   if o.dx>0 then
-    o._draw()
-   else
-    add(bottom_cars,o)
-   end
-  else
-    add(sidewalk_obsts,o)
-  end
- end
- 
- -- draw buildings
- for b in all(buildings) do
-  b._draw()
- end
- 
- -- draw sidewalk bones
- for b in all(bones) do
-   b._draw()
- end
- 
- -- draw sidewalk obstacles
- -- in behind the dog
- for o in all(obstacles) do
-  if o.type!="car" then
-   o._draw()
-  end
- end
- 
- -- draw bottom cars behind dog
- -- todo: do this on update()
- local foregr_cars={}
- for c in all(bottom_cars) do
-  if dog.y+7>c.y+7
-  then
-   c._draw()
-  else
-   add(foregr_cars,c)
-  end
- end
- 
- -- draw dog and human
- dog._draw()
- human._draw()
- 
- -- draw bottom cars that are
- -- on the foreground
- for c in all(foregr_cars) do
-  c._draw()
+ -- draw all elements
+ for tr in all(to_render) do
+  tr._draw()
  end
  
  -- restore color palette to
@@ -896,7 +895,7 @@ function dog._update()
      end
      -- shake cam to add drama
      -- to the collision
-     cam_shake=1
+     cam_shake=0.5
      dog_moved=true
     
     -- potential backwards
@@ -925,7 +924,7 @@ function dog._update()
     -- in a camera shake, the
     -- dog will lose a bone
     -- as a punishment
-    if cam_shake==1
+    if cam_shake!=0
     and bones_count>0
     then
      bones_count-=1

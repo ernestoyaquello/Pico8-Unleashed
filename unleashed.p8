@@ -830,16 +830,13 @@ function dog._update()
    )
    if col!=nil then
     local dog_moved=false
+    local crash=false
     
     -- potential frontal
     -- collision
     if col[1]<0
-    and last_dog_x-1<=dog.x+col[1]-o.dx
+    and abs(cp[1]-(o.x+o.col_x_ofst))-1<=scroll_speed-o.dx
     and dog.z>col[3]
-    -- avoid crashes with the
-    -- car window
-    and (o.type!="car"
-     or last_dog_x-1<=o.x-o.dx)
     then
      if o.dx<0 then
       -- frontal crash with a
@@ -862,6 +859,7 @@ function dog._update()
       -- to the crash
       cam_shake=1
       dog_moved=true
+      crash=true
      else
       -- move the dog back
       -- to avoid going
@@ -897,6 +895,7 @@ function dog._update()
      -- to the collision
      cam_shake=0.5
      dog_moved=true
+     crash=true
     
     -- potential backwards
     -- collision
@@ -920,11 +919,10 @@ function dog._update()
     end
     
     -- if this collision was
-    -- a crash that resulted
-    -- in a camera shake, the
-    -- dog will lose a bone
-    -- as a punishment
-    if cam_shake!=0
+    -- a crash, the dog will
+    -- lose a bone as a
+    -- punishment
+    if crash
     and bones_count>0
     then
      bones_count-=1
@@ -1546,6 +1544,7 @@ function create_car(x,y,speed)
   z=0,
   dx=speed,
   dx2=0,
+  col_x_ofst=0,
   width=4*8,
   height=2*8,
   bone=bone,
@@ -2801,6 +2800,7 @@ function create_scaffold(x,y)
   y=y,
   z=0,
   dx=0,
+  col_x_ofst=14,
   width=32+num_blocks*12,
   height=25,
   tools=tools,
@@ -2843,7 +2843,7 @@ function create_scaffold(x,y)
  instance._collision=function(x,y,z)
   return collision(
    x,y,z,
-   instance.x+14,
+   instance.x+instance.col_x_ofst,
    instance.x+instance.width-12,
    instance.y+11,
    instance.y+16,

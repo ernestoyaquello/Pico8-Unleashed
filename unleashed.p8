@@ -210,8 +210,8 @@ function _update60()
  -- sidewalk
  if state=="play"
  and enter_transition==nil
- and flr(rnd(200/scroll_speed))==1
  and #bones==0
+ and flr(rnd(200/scroll_speed))==1
  then
   local bx=end_x+1
   local elev=flr(rnd(2))==0
@@ -262,12 +262,13 @@ function _update60()
     -- where those new cars
     -- would spawn
     if (
-     (o.dx<0 
-      or o.dx<scroll_speed)
+     (o.dx<0 or o.dx<scroll_speed)
      and o_end_x+o.width+18>=end_x
     )
-    or (o.dx>scroll_speed
-     and o.x-o.width-18<=start_x)
+    or (
+     o.dx>scroll_speed
+     and o.x-o.width-18<=start_x
+    )
     then
      car_ys[o.y]=nil
     end
@@ -498,7 +499,7 @@ function _draw()
  if state=="game over"
  and game_over_msg!=nil
  then
-  fillp(0b1111111111111111.01)
+  fillp(0b1111111111111111.011)
  end
 
  -- yellow for transparencies
@@ -520,7 +521,7 @@ function _draw()
  if state=="game over"
  and game_over_msg!=nil
  then
-  fillp(0b0000000000000000.01)
+  fillp(0b0000000000000000.011)
  end
  
  -- draw game over message
@@ -835,8 +836,8 @@ function dog._update()
     -- potential frontal
     -- collision
     if col[1]<0
-    and abs(cp[1]-(o.x+o.col_x_ofst))-1<=scroll_speed-o.dx
-    and dog.z>col[3]
+    and dog.z>=col[3]
+    and abs(cp[1]-(o.x+o.col_x_ofst))-3<=scroll_speed-o.dx
     then
      if o.dx<0 then
       -- frontal crash with a
@@ -872,11 +873,11 @@ function dog._update()
      
     -- potential side
     -- collision
-    elseif ((col[2]<0
+    elseif dog.z>=col[3]
+    and ((col[2]<0
      and last_dog_y-1<=dog.y+col[2])
       or (col[2]>0
        and last_dog_y+1>=dog.y+col[2]))
-    and dog.z>col[3]
     then
      -- side crash against the
      -- obstacle, the dog will
@@ -900,8 +901,9 @@ function dog._update()
     -- potential backwards
     -- collision
     elseif col[1]>0
+    and dog.dx<0
+    and dog.z>=col[3]
     and last_dog_x+1>=dog.x-col[1]+o.dx
-    and dog.z>col[3]
     then
      dog.x+=col[1]+4
      dog.dx=0
@@ -1449,9 +1451,11 @@ function leash._draw()
   )
   -- draw leash
   line(
-   human.x+8,human.y+human.z+13,
-   dog.x+4,dog.y+dog.z+6,
-   2
+   human.x+8,
+   human.y+human.z+13,
+   dog.x+4,
+   dog.y+dog.z+6,
+   14
   )
  end
 end
@@ -1832,7 +1836,7 @@ local function update(inst)
  elseif state=="game over" then
   -- get next to the dog to
   -- hold it by the leash
-  inst.dx=(dog.x-inst.x-11)/12
+  inst.dx=(dog.x-inst.x-11)/18
   inst.dy=(dog.y-inst.y-8)/5
  end
  
@@ -2242,27 +2246,29 @@ local function update(inst)
      inst.shake=1
     end
     
+    -- make a sound as soon as
+    -- a line is almost fully
+    -- shown, except for the
+    -- first line, as it
+    -- doesn't show a score
+    if inst.texts_to_show_chars>28
+    and inst.texts_to_show_chars%25==0
+    then
+     sfx(2)
+    end
+    
     -- check if a new line
-    -- has been reached
-    if inst.texts_to_show_chars%28==0 then
-     -- make a pause before the
-     -- next line (unless this
-     -- is the last one, in
-     -- which case no pause
-     -- after it is needed)
-     if inst.texts_to_show_chars<total_chars then
-      inst.temp_pause=30
-     end
-     
-     -- make a winning sound
-     -- for the line that has
-     -- just been reached,
-     -- except if it is the
-     -- first one, which
-     -- doesn't show a score
-     if inst.texts_to_show_chars>28 then
-      sfx(2)
-     end
+    -- has been reached, and
+    -- if so, make a pause
+    -- before the next one
+    -- (unless this is the
+    -- last one, in which case
+    -- no pause after it is
+    -- needed)
+    if inst.texts_to_show_chars<total_chars 
+    and inst.texts_to_show_chars%28==0
+    then
+     inst.temp_pause=30
     end
    end
   end
@@ -2612,7 +2618,7 @@ local function update(inst)
    -- a little while
    inst.pause=100
    if not button_pressed then
-    sfx(3)
+    sfx(7)
    end
   end
  end
@@ -2656,7 +2662,7 @@ local function update(inst)
   elseif not inst.menu_fully_shown then
    inst.menu_bg_y2=94
    inst.menu_fully_shown=true
-   sfx(3)
+   sfx(7)
   end
  end
 
@@ -3139,8 +3145,9 @@ __map__
 __sfx__
 0001000005010080100b0100f010140101b010230102e0100e000120001600016000130001400015000160001600017000180001800018000170001700017000170001600016000160000d0000d0000d0000d000
 aa0100002d663286632766323653216431c6431b64317633156330f6330e6330a6330763302633006030460300603026030160300603006030060300603006030060300603006030060300603006030060300603
-490200002105025050260502605025050220502005014050180501d05025050320503c0503c0503c0502700027000080000800008000080000800008000080000200002000020000200002000020000200002000
+010200002175725757267572675725757227572075714757187571d75725757327573c7573c7573c7572770727707087070870708707087070870708707087070270702707027070270702707027070270702707
 480200000e550125501455015550125500f550145501b5501f55022550235002b5002a5002e500305001650016500005000050000500005000050000500005000050000500005000050000500005000050000500
 ab0200000525305253042530324303243032430323302233022330222302223022230221302213022500225002251022510225102251022510225102251022510225102251022510225102251022510225102251
 0002000007030080300c0301103019030220302f03000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 d60100002a66023060256601e0501f640180401a64012040146300a03007630030300063002600016000060000600006000060000600006000060000600006000060000600006000060000600006000060000600
+180300000c5570c5570e55714557195571e5572155716507195071b5072550727507295072b5072d5070050700507005070050700507005070050700507005070050700507005070050700507005070050700507

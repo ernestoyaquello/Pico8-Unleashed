@@ -2,12 +2,6 @@ pico-8 cartridge // http://www.pico-8.com
 version 41
 __lua__
 -- unleashed --
--- game by ernestoyaquello --
-
--- todo: create transitions to
--- move from the intro state
--- and the game over state
--- to the play state nicely
 
 function init(initial_state)
  state=initial_state
@@ -39,7 +33,7 @@ function init(initial_state)
  bones={}
  obstacles={}
  to_render={}
- stopped_car_lane=nil
+ blocked_lane=nil
  bones_count=0
  bone_being_lost=false
  meters_aux=0
@@ -190,15 +184,95 @@ function _update60()
   max_b_end_x+=nb.width
  end
  
- -- todo: update buildings
- -- to make them animate?
+ -- create new obstacle list
+ -- and add the existing
+ -- ones, but only if they
+ -- are still within view
+ local scaffold_x=300
+ local scaffold_end_x=-300
+ local vehicles={}
+ local vehicle_ys={
+  [18]=1.2,
+  [40]=1.3,
+  [104]=-0.85,
+  [116]=-1.05,
+  [131]=-0.95,
+ }
+ local oi=1
+ local has_bikes=false
+ while oi<=#obstacles do
+  local o=obstacles[oi]
+  local o_end_x=o.x+o.width-1
+  if o.x<=end_x+1 and o_end_x>=start_x-33 then
+   -- obstacle within view
+   if o.type=="vehicle" then
+    -- vehicles will be in their
+    -- own list temporarily
+    -- because they need to be
+    -- sorted by lane before
+    -- getting added to the
+    -- list of obstacles
+    del(obstacles,o)
+    add(vehicles,o)
+    has_bikes=has_bikes or o.v_type=="bike"
+    -- make the lane unavailable
+    -- for new vehicles in case
+    -- this one is too close to
+    -- where those new vehicles
+    -- would spawn
+    if (
+     (o.dx<0 or o.dx<scroll_speed)
+     and o_end_x+o.width+18>=end_x
+    )
+    or (
+     o.dx>scroll_speed
+     and o.x-o.width-18<=start_x
+    )
+    then
+     vehicle_ys[o.y]=nil
+    end
+   else
+    -- keep obstacle in list
+    if o_end_x>=start_x
+    and o.x<=end_x
+    then
+     add(to_render,o)
+     if o.type=="scaffold" then
+      scaffold_x=o.x
+      scaffold_end_x=o.x+o.width
+     end
+    end
+    oi+=1
+   end
+  else
+   -- obstacle not within view
+   del(obstacles,o)
+  end
+ end
+ 
+ -- add new scaffolds when
+ -- possible
+ if state=="play"
+ and enter_transition==nil
+ and #obstacles==0
+ and not has_bikes
+ and flr(rnd(170/scroll_speed))==1
+ then
+  local s=create_scaffold(end_x+1,101)
+  add(obstacles,s)
+  scaffold_x=s.x
+  scaffold_end_x=s.x+s.width
+ end
  
  -- remove sidewalk bones that
  -- are out of view
  local bi=1
  while bi<=#bones do
   local b=bones[bi]
-  if b.x+7<start_x then
+  if b.x+7<start_x
+  or (b.x+7>=scaffold_x
+   and b.x<=scaffold_end_x)
+  then
    del(bones,b)
   else
    add(to_render,b)
@@ -214,13 +288,13 @@ function _update60()
  and flr(rnd(200/scroll_speed))==1
  then
   local bx=end_x+1
-  local elev=flr(rnd(2))==0
   for _=1,1+flr(rnd(3)) do
-   local nb=create_bone(bx,117,-3)
-   if elev then
-    nb.z=-15
+   if not (bx+7>=scaffold_x
+    and bx<=scaffold_end_x)
+   then
+    local nb=create_bone(bx,117,-18)
+    add(bones,nb)
    end
-   add(bones,nb)
    bx+=12
   end
  end
@@ -230,95 +304,37 @@ function _update60()
   b._update()
  end
  
- -- create new obstacle list
- -- and add the existing
- -- ones, but only if they
- -- are still within view
- local cars={}
- local car_ys={
-  [18]=1.2,
-  [40]=1.3,
-  [116]=-1.0,
-  [131]=-0.9,
- }
- local oi=1
- while oi<=#obstacles do
-  local o=obstacles[oi]
-  local o_end_x=o.x+o.width-1
-  if o.x<=end_x+1 and o_end_x>=start_x-33 then
-   -- obstacle within view
-   if o.type=="car" then
-    -- cars will be in their
-    -- own list temporarily
-    -- because they need to be
-    -- sorted by lane before
-    -- getting added to the
-    -- list of obstacles
-    del(obstacles,o)
-    add(cars,o)
-    -- make the lane unavailable
-    -- for new cars in case
-    -- this one is too close to
-    -- where those new cars
-    -- would spawn
-    if (
-     (o.dx<0 or o.dx<scroll_speed)
-     and o_end_x+o.width+18>=end_x
-    )
-    or (
-     o.dx>scroll_speed
-     and o.x-o.width-18<=start_x
-    )
-    then
-     car_ys[o.y]=nil
-    end
-   else
-    -- keep obstacle in list
-    if o_end_x>=start_x
-    and o.x<=end_x
-    then
-     add(to_render,o)
-    end
-    oi+=1
-   end
-  else
-   -- obstacle not within view
-   del(obstacles,o)
-  end
- end
- 
- -- add new obstacles at random
- -- todo: make this actually random
- -- todo: add moving obstacles
- if state=="play"
- and enter_transition==nil
- and #obstacles==0
- then
-  local s=create_scaffold(end_x+1,101)
-  add(obstacles,s)
- end
- 
- -- create new cars at random
- for cy,spd in pairs(car_ys) do
-  -- avoid adding cars when
+ -- create new vehicles at random
+ for vy,spd in pairs(vehicle_ys) do
+  -- avoid adding vehicles when
   -- their speed matches the
   -- scrolling, as they woulld
   -- not move
   local factor=abs(spd-scroll_speed)
   if factor!=0
   and enter_transition==nil
-  and flr(rnd(60/factor))==0
+  and (
+   (vy!=104 
+    and flr(rnd(50/factor))==0)
+   or (vy==104 
+    and flr(rnd(60/factor))==0)
+  )
   then
-   local nc_x=end_x+1
+   local nv_x=end_x+1
    if spd>scroll_speed then
-    nc_x=start_x-32
+    nv_x=start_x-32
    end
-   local nc=create_car(nc_x,cy,spd)
-   add(cars,nc)
+   local nv=nil
+   if vy!=104 then
+    nv=create_car(nv_x,vy,spd)
+   elseif #obstacles==0 then
+    nv=create_bike(nv_x,vy,spd)
+   end
+   add(vehicles,nv)
   end
  end
  
- -- add the cars sorted by lane
+ -- add the vehicles sorted by lane
  -- to ensure they are drawn in
  -- the right order, making
  -- sure to also add the dog
@@ -326,46 +342,46 @@ function _update60()
  -- rendering spot
  local dog_added=false
  local human_added=false
- for cy in all({18,40,116,131}) do
-  local remaining_cars={}
-  for c in all(cars) do
-   if c.y==cy then
-    -- car in the right lane,
+ for vy in all({18,40,104,116,131}) do
+  local remaining_vehicles={}
+  for v in all(vehicles) do
+   if v.y==vy then
+    -- vehicle in the right lane,
     -- can be added right away
-    add(obstacles,c)
-    if c.dx>0 then
-     -- top car, first thing
+    add(obstacles,v)
+    if v.dx>0 then
+     -- top vehicle, first thing
      -- to render, as it will
      -- be behind the buildings
-     add(to_render,c,1)
+     add(to_render,v,1)
     else
-     -- bottom car, might or
-     -- might not be in front
-     -- of the dog and the
-     -- human
+     -- bottom vehicle, might
+     -- or might not be in
+     -- front of the dog and
+     -- the human
      if not dog_added
-     and dog.y<=c.y
+     and dog.y<=v.y
      then
       add(to_render,dog)
       dog_added=true
      end
      if not human_added
-     and human.y+7<=c.y
+     and human.y+7<=v.y
      then
       add(to_render,human)
       human_added=true
      end
   
-     add(to_render,c)
+     add(to_render,v)
     end
    else
-    -- car not in the right
+    -- vehicle not in the right
     -- lane, will be added
     -- later
-    add(remaining_cars,c)
+    add(remaining_vehicles,v)
    end
   end
-  cars=remaining_cars
+  vehicles=remaining_vehicles
  end
  
  -- make sure the dog and the
@@ -405,7 +421,7 @@ function _update60()
   +min(1,flr(meters/100)/20)
   
  -- shake the camera if needed
- -- to dramatize car crashes
+ -- to dramatize crashes
  if cam_shake!=0 then
   cam_offset_x=4-rnd(8)
   cam_offset_y=4-rnd(8)
@@ -580,7 +596,7 @@ function _draw()
   bc_bg_color
  )
  spr(
-  29,
+  50,
   m_end_x+5,
   cam_y+2
  )
@@ -630,6 +646,7 @@ local dog={
  sprite=nil,
  leash=nil,
  shadow_col=nil,
+ low_shadow=nil,
 }
 
 local function spr_duration()
@@ -832,12 +849,18 @@ function dog._update()
    if col!=nil then
     local dog_moved=false
     local crash=false
+    dog.low_shadow=o.v_type=="bike"
+     and (col[3]>-12 or dog.z<-15)
     
     -- potential frontal
     -- collision
     if col[1]<0
     and dog.z>=col[3]
-    and abs(cp[1]-(o.x+o.col_x_ofst))-3<=scroll_speed-o.dx
+    and ((o.v_type!="bike"
+      and abs(cp[1]-(o.x+o.col_x_ofst))-3<=scroll_speed-o.dx)
+     or (o.v_type=="bike"
+      and col[3]>-11)
+      and dog.dx>=0)
     then
      if o.dx<0 then
       -- frontal crash with a
@@ -916,8 +939,16 @@ function dog._update()
     if col[3]!=0
     and not dog_moved
     then
+     -- todo: if this happens
+     -- because of a bike,
+     -- ensure shadow is still
+     -- at the real floor level
      dog.floor_z=col[3]
-     dog.z=min(dog.z,col[3])
+
+     if col[3]<dog.z then
+      dog.z=col[3]
+      dog.dz=0
+     end
     end
     
     -- if this collision was
@@ -970,9 +1001,9 @@ function dog._update()
    end
   end
   -- take the bones placed on
-  -- top of cars
+  -- top of vehicles
   for o in all(obstacles) do
-   if o.type=="car"
+   if o.type=="vehicle"
    and o.bone!=nil
    and not o.bone.taken
    and not o.bone.is_lost
@@ -1038,7 +1069,7 @@ function dog._update()
   end
  elseif state=="game over" then
   -- sitting down for game over
-  dog.sprite=11
+  dog.sprite=51
  end
  
  -- update leash (needs updated
@@ -1066,11 +1097,15 @@ function dog._draw()
  end
 
  -- draw dog shadow
+ local shadow_offset_y=0
+ if dog.low_shadow then
+  shadow_offset_y=-dog.floor_z
+ end
  ovalfill(
   dog.x+1,
-  dog.y+dog.floor_z+6,
+  dog.y+dog.floor_z+6+shadow_offset_y,
   dog.x+6,
-  dog.y+dog.floor_z+8,
+  dog.y+dog.floor_z+8+shadow_offset_y,
   dog.shad_col
  )
 
@@ -1104,6 +1139,7 @@ function create_dog(x,bottom_y)
   0
  )
  dog.shadow_col=5
+ dog.low_shadow=false
  
  jump_done=true
  can_move_up=true
@@ -1488,9 +1524,7 @@ function create_leash(dog_x,dog_y,dog_z)
  return leash
 end
 -->8
--- car info --
-
--- todo: animate wheels
+-- vehicle info --
 
 local function update(inst)
  -- reduce horizontal acc
@@ -1499,29 +1533,31 @@ local function update(inst)
   inst.dx2=0
  end
  
- -- apply scroll speed to car,
- -- but only if the game is
+ -- apply scroll speed to
+ -- moving obstacle, but
+ -- only if the game is
  -- playing (or if the lane
  -- isn't occupied by the dog
  -- while the game is over)
- if stopped_car_lane!=inst.y
- and (state=="play"
-  or inst.dx>0
-  or (inst.y==116 and dog.y!=119)
-  or (inst.y==131 and dog.y!=134)
-  or inst.x<human.x
-  or inst.x-24>dog.x)
+ if (blocked_lane!=inst.y
+  and (state=="play"
+   or inst.dx>0
+   or (inst.y==104 and dog.y!=107)
+   or (inst.y==116 and dog.y!=119)
+   or (inst.y==131 and dog.y!=134)
+   or inst.x-24>dog.x))
+ or inst.x<dog.x
  then
   inst.x+=inst.dx
  else
-  stopped_car_lane=inst.y
+  blocked_lane=inst.y
  end
  inst.x+=inst.dx2
  
  -- update bone if needed
  if inst.bone!=nil then
   if not inst.bone.taken then
-   inst.bone.x=inst.x+13
+   inst.bone.x=inst.x+inst.bone_offset_x
   end
   inst.bone._update()
  end
@@ -1552,7 +1588,9 @@ function create_car(x,y,speed)
   width=4*8,
   height=2*8,
   bone=bone,
-  type="car",
+  bone_offset_x=13,
+  type="vehicle",
+  v_type="car",
  }
  
  -- change the car colors to
@@ -1622,6 +1660,117 @@ function create_car(x,y,speed)
    instance.y+instance.height-1,
    0,
    -4
+  )
+ end
+ 
+ return instance
+end
+
+function create_bike(x,y,speed)
+ local instance={
+  x=x,
+  y=y,
+  z=0,
+  dx=speed,
+  dx2=0,
+  col_x_ofst=0,
+  width=2*8,
+  spr_aux=0,
+  spr_index=1,
+  type="vehicle",
+  v_type="bike",
+ }
+ 
+ -- change the bike colors to
+ -- make each bike look unique
+ local cs={}
+ 
+ -- bike color
+ local cs_rnd=flr(rnd(5))
+ if cs_rnd==0 then
+  cs={{9,14}}
+ elseif cs_rnd==1 then
+  cs={{9,3}}
+ elseif cs_rnd==2 then
+  cs={{9,8}}
+ elseif cs_rnd==3 then
+  cs={{9,11}}
+ end
+ 
+ -- backpack color
+ cs_rnd=flr(rnd(2))
+ if cs_rnd==0 then
+  add(cs,{3,8})
+  add(cs,{11,9})
+ end
+ 
+ -- clothes color
+ cs_rnd=flr(rnd(3))
+ if cs_rnd==0 then
+  add(cs,{1,12})
+  add(cs,{13,2})
+ elseif cs_rnd==1 then
+  add(cs,{1,2})
+  add(cs,{13,1})
+ end
+ 
+ -- skin color
+	cs_rnd=flr(rnd(2))
+	if cs_rnd==0 then
+	 add(cs,{15,4})
+ end
+ 
+ local bike_sprts={
+  {{colswap=cs},{11,12},{27,28}},
+  {{colswap=cs},{11,14},{29,30}},
+  {{colswap=cs},{11,15},{27,31}},
+  {{colswap=cs},{11,47},{45,46}},
+ }
+ 
+ instance._update=function()
+  update(instance)
+  
+  if blocked_lane!=instance.y then
+   instance.spr_aux+=1
+  end
+  instance.spr_index=1+flr(abs(instance.dx)*instance.spr_aux/5)
+  if instance.spr_index>#bike_sprts then
+   instance.spr_aux=0
+   instance.spr_index=1
+  end
+ end
+
+ instance._draw=function()
+  local offset={
+   x=instance.x,
+   y=instance.y-2,
+   z=instance.z,
+  }
+  draw_sprts(bike_sprts[instance.spr_index],offset)
+ end
+
+ instance._collision=function(x,y,z)
+  local col=collision(
+   x,y,z,
+   instance.x+8,
+   instance.x+16,
+   instance.y,--+9
+   instance.y+12,
+   0,
+   -12
+  )
+  if col!=nil then
+   return col
+  end
+  
+  return collision(
+   x,y,z,
+   instance.x,
+   instance.x+18,
+   instance.y,--+9
+   instance.y+12,
+   0,
+   -5
   )
  end
  
@@ -1870,7 +2019,7 @@ local function update(inst)
     )
    end
    if col!=nil then
-    if o.type!="scaffold" then
+    if o.v_type=="car" then
      -- the obstacle "roof" is
      -- now the  floor for the
      -- human
@@ -1886,7 +2035,7 @@ local function update(inst)
      end
     else
      -- avoid trespassing
-     -- inside the scaffold
+     -- inside the obstacle
      inst.y+=col[2]
     end
 
@@ -1900,8 +2049,8 @@ local function update(inst)
  
  -- detect if the human will
  -- collide with an obstacle
- -- soon to make him jump if
- -- needed
+ -- soon to make him jump or
+ -- move if needed
  if not collided
  and state=="play"
  then
@@ -1911,25 +2060,44 @@ local function update(inst)
    0,
   }
   for o in all(obstacles) do
-   if o.dx<0 then
+   col=nil
+   if o.type!="scaffold" then
     col=o._collision(
      cp_future[1],
      cp_future[2],
      cp_future[3]
     )
-    if col!=nil
-    and col[3]<0
-    and inst.z==0
-    and inst.dz==0
-    then
-     -- make the human jump
-     -- to avoid the obstacle
-     -- he is heading towards
-     inst.dz=-jump_acc*1.2
-
-     -- collision found, end
-     -- the loop
-     break
+   else
+    col=o._collision(
+     cp_future[1],
+     cp_future[2]-2,
+     cp_future[3]
+    )
+   end
+   if col!=nil then
+    if o.v_type=="car" then
+     if col[3]<0
+     and inst.z==0
+     and inst.dz==0
+     then
+      -- make the human jump
+      -- to avoid the car
+      -- he is heading towards
+      inst.dz=-jump_acc*1.2
+      
+      -- collision found, end
+      -- the loop
+      break
+     end
+    else
+     if col[2]>0
+     and inst.dy<=0
+     then
+      -- push human away from
+      -- the obstacle
+      local push=col[2]-(cp[2]-cp_future[2])
+      inst.y+=push/3
+     end
     end
    end
   end
@@ -1991,7 +2159,7 @@ local function draw(inst)
  }
  local n_sprts={
   -- still pose by default
-  {colswap=nil},{43},{30},
+  {colswap=nil},{43},{44},
  }
  if inst.spr_index!=nil then
   n_sprts=sprts[inst.spr_index]
@@ -2026,7 +2194,7 @@ end
 -->8
 -- bone info --
 
-local sprts={27,28}
+local sprts={49,48}
 local frames_per_sprite=18
 
 local function update(inst)
@@ -2123,7 +2291,7 @@ function create_bone(
  instance._collision=function(x,y,z)
   if instance.floor_z<0 then
    -- wider collision box when
-   -- on top of a car
+   -- on top of a vehicle
    return collision(
     x,y,z,
     instance.x-3,
@@ -2809,7 +2977,6 @@ function create_scaffold(x,y)
   col_x_ofst=14,
   width=32+num_blocks*12,
   height=25,
-  tools=tools,
   type="scaffold",
  }
  
@@ -2851,7 +3018,7 @@ function create_scaffold(x,y)
    x,y,z,
    instance.x+instance.col_x_ofst,
    instance.x+instance.width-12,
-   instance.y+11,
+   instance.y,--+11
    instance.y+16,
    0,
    -instance.height
@@ -2861,38 +3028,38 @@ function create_scaffold(x,y)
  return instance
 end
 __gfx__
-00000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbaaaaaaaaaaaaaaaaa00000000000000000000000000000000
-00000000aaaaaaaaaaaaaaaaaaaaa0aaaaaaa0aaaaaaaaaaaaaaaaaaaaaaaaaaaaa3bbbbbbbbbbb3aaaaaaaaaaaaaaaa00000000000000000000000000000000
-007007004aaaa0aaaaaaa0aaaaaaa44aaaaaa44aaaaaa0aa4aaaa0aaaaaaaaaaa333bbbbbbbbbbb33aaaaaaaaaaaa0aa00000000000000000000000000000000
-000770004aaaa44a4aaaa44a4aaa80404aaa80404aaaa44a4aaaa44aaabbbbb331d3bbbbbbbbbbb31333bbaa4aaaa44a00000000000000000000000000000000
-00077000a44480404a4480404a4480444a4480444a448040a4448040abbbbb3111d3bbbbbbbbbbb3103b3b1a4a44804000000000000000000000000000000000
-00700700a4448044a4448044a444484aa44448aaa4448044a44480446bbbbb3111d3bbbbbbbbbbb31133bb30a444804400000000000000000000000000000000
-00000000aa4448aaa44448aaa444aaaa444444aaa44448aaa44448aa3bbbbb3111d3bbbbbbbbbbb3103b3b10a44448aa00000000000000000000000000000000
-00000000aa44aaaaaa4a4aaaa4aaaaaaaaaaaa4a4aaaa4aaaaaa4aaa3bbbbb3111d33333333333331133bb30aa44a4aa00000000000000000000000000000000
-666666665655555556555555666666666666666666666666aaaaaaaa3bbbbb311331111113111111303b3b10aaaaa4aaaaaaa9aaaaaaaaaaaaa22aaa00000000
-666666665555565555555655666666666666666666666666aaadddaa3bbbbbb331111111131111111333bb30aaaa474aaaaa979aaaaaaaaaaa222aaa00000000
-666666665555555555555555666666666666666666666666aadd6dda3b3333333333333333333333333338e0aaaa4774aaaa9779aaaafaaaaa222aaa00000000
-666666665555555555555555555555556666666666666666a5ddddda63333333333333333333333333333885aaa4722aaaa97eeaaaaaffaaaaf22faa00000000
-666666665565555555655555556555556666666666666666a55d5d5a76333333111333333333331113333315a4472aaaa997eaaaaaafaaaaaaaccaaa00000000
-666666665555556555555555555555656666666666666666a155555a5133333155513333333331555133331a4772aaaa977eaaaaaffaaaaaaaaccaaa00000000
-666666665555555550505050555555556777777777666666aa1111aaa511111055501111111110555011115aa462aaaaa96eaaaaaafaaaaaaaaccaaa00000000
-666666665555555505050505555555556777777777666666aaaaaaaaaa5555550005555555555500055555aaaa2aaaaaaaeaaaaaaaaaaaaaaaa11aaa00000000
-aaaaaaaaaaaaaaaaaaaaa0aaaaaaa0aaaaaaa0aaaaaaaaaa4aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa00000000000000000000000000000000
-aaaaaaaaaaaaa0aaaaaaa44aaaaaa44a4aaaa44a4aaaa0aa4aaaa0aa4aaaa0aaaaaaa0aaaaaaaaaaaaaaaaaaaaaaaaaa00000000000000000000000000000000
-aaaaa0aaaaaaa44aaaaa80404aaa80404aaa80404aaaa44aa4aaa44a4aaaa44a4aaaa44a4aaaa0aaaaaaaaaaaaaaaaaa00000000000000000000000000000000
-4aaaa44a4aaa80404aa480444a448044a4448044a4aa8040444a8040a44a80404aaa80404aaaa44aaaaaaaaaaaaaaaaa00000000000000000000000000000000
-4a4480404a4480444a4448aaa44448aa444448aa444480444444804444448044a4448044a4448040aaaaaaaaaaaaaaaa00000000000000000000000000000000
-a4448044a44448aaa44444aa444444aa444444aa444448aa444448aa444448aaa44448aaa4448044aaa0faaaaaaaaaaa00000000000000000000000000000000
-a44448aa444444aa444aaaaa44aaaaaa44aaa4aa444444aaa4a444aa44a444aaa4a44aaaa4a448aaaaaffaaaaaa0faaa00000000000000000000000000000000
-aaa44aaa44aaaaaa44aaaaaaaaaaaaaaaaaaaaaaaaaaa4aaaaaaa4aaa4aa4aaaa4aa4aaaaa4a4aaaaa222aaaaaaffaaa00000000000000000000000000000000
-aa267daaaa267daaaddaaddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa565555555050505050505050a2a222faaa222aaaaaa22aaaaaa22aaaaaa22aaaaa222aaa
-aa267daaaa267daa267dd76daaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa555556550505050505050505afa22aaaaaf22aaaaaa22aaaaaa22aaaaa222aaaaaf222fa
-aa267daaaa267daa2677777d4aaa656aaaaa656aaaaa656aaaaa656a555555555050505050505050aaa22aaaaaa22faaaaa22aaaaaa22aaaaa222aaaaaa22aaa
-aa267daaaa267daaa26777da4aa66ff64aa66ff64aa66ff64aa66ff6555555550505050505050505aaaccaaaaaa22aaaaaaf2aaaaaa2faaaaaf22faaaaacccaa
-a26777daaa267daaaa267daaa44fe5f54a4fe5f54a4fe5f54a4fe5f5505050505050505050505050aaacacaaaaaccaaaaaaccaaaaaaccaaaaaaccaaaaaacacaa
-2677777daa267daaaa267daaa44fe5ffa44fe5ffa44fe5ffa44fe5ff050505050505050505050505a1caaacaaaaccaaaaaaccaaaaaaccaaaaaacacaaaacaaa1a
-267dd76daa267daaaa267daaa444fe6aa4444e6aa444444aa4444e6a505050505555555550505050aaaaaaa1aa1cacaaaaa1caaaaaac1aaaaacaa1aaaa1aaaaa
-addaaddaaa267daaaa267daaa4aa4aaaa4aaa4aaa4aaaaaa4aaaa4aa050505055555555505050505aaaaaaaaaaaaa1aaaaaa1aaaaaa1aaaaaa1aaaaaaaaaaaaa
+00000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbaaaaaaaaaaaaaaaaaaaaaaaaa00000000aaaaaaaaaf0aaaaa
+00000000aaaaaaaaaaaaaaaaaaaaa0aaaaaaa0aaaaaaaaaaaaaaaaaaaaaaaaaaaaa3bbbbbbbbbbb3aaaaaaaaaaaaaaaaaf0aaaaa00000000af0aaaaaaffaaaaa
+007007004aaaa0aaaaaaa0aaaaaaa44aaaaaa44aaaaaa0aa4aaaa0aaaaaaaaaaa333bbbbbbbbbbb33aaaaaaaaaaaaaaaaffaaaaa00000000affaaaaaaddbbbaa
+000770004aaaa44a4aaaa44a4aaa80404aaa80404aaaa44a4aaaa44aaabbbbb331d3bbbbbbbbbbb31333bbaaaaaaaaaaaddbbbaa00000000addbbbaaadd333aa
+00077000a44480404a4480404a4480444a4480444a448040a4448040abbbbb3111d3bbbbbbbbbbb3103b3b1aaaaaaaaaadd333aa00000000add333aaddd333aa
+00700700a4448044a4448044a444484aa44448aaa4448044a44480446bbbbb3111d3bbbbbbbbbbb31133bb30aaaaa0fdddd333aa00000000ddd333aaa11333aa
+00000000aa4448aaa44448aaa444aaaa444444aaa44448aaa44448aa3bbbbb3111d3bbbbbbbbbbb3103b3b10aaaaa9aaa11333aa00000000a11333aaa10aaaaa
+00000000aa44aaaaaa4a4aaaa4aaaaaaaaaaaa4a4aaaa4aaaaaa4aaa3bbbbb3111d33333333333331133bb30aaaaa99991aaaaaa00000000991aaaaa91aaaaaa
+666666665655555556555555666666666666666666666666aaaaaaaa3bbbbb311331111113111111303b3b10aa0009a91a9000aaaa0009a9a19000aa119000aa
+666666665555565555555655666666666666666666666666aaadddaa3bbbbbb331111111131111111333bb30a0aa90a91a09aa0aa0aa90a0a109aa0a0a09aa0a
+666666665555555555555555666666666666666666666666aadd6dda3b3333333333333333333333333338e00aa9aa0099999aa00aa9aa0a09999aa099999aa0
+666666665555555555555555555555556666666666666666a5ddddda633333333333333333333333333338850aaaaa0aa0aaaaa00aaaaa0aa0aaaaa0a0aaaaa0
+666666665565555555655555556555556666666666666666a55d5d5a76333333111333333333331113333315a0aaa0aaaa0aaa0aa0aaa0aaaa0aaa0aaa0aaa0a
+666666665555556555555555555555656666666666666666a155555a5133333155513333333331555133331aaa000aaaaaa000aaaa000aaaaaa000aaaaa000aa
+666666665555555550505050555555556777777777666666aa1111aaa511111055501111111110555011115aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+666666665555555505050505555555556777777777666666aaaaaaaaaa5555550005555555555500055555aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaaaaaaaaaaaaaaaa0aaaaaaa0aaaaaaa0aaaaaaaaaa4aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa22aaaaa0009a11a9000aaaf0aaaaa
+aaaaaaaaaaaaa0aaaaaaa44aaaaaa44a4aaaa44a4aaaa0aa4aaaa0aa4aaaa0aaaaaaa0aaaaaaaaaaaaaaaaaaaaaaaaaaaa222aaaa0aa90a0a109aa0aaffaaaaa
+aaaaa0aaaaaaa44aaaaa80404aaa80404aaa80404aaaa44aa4aaa44a4aaaa44a4aaaa44a4aaaa0aaaaaaaaaaaaaaaaaaaa222aaa0aa9aa0a09999aa0addbbbaa
+4aaaa44a4aaa80404aa480444a448044a4448044a4aa8040444a8040a44a80404aaa80404aaaa44aaaaaaaaaaaaaaaaaaaf22faa0aaaaa0aa0aaaaa0add333aa
+4a4480404a4480444a4448aaa44448aa444448aa444480444444804444448044a4448044a4448040aaaaaaaaaaaaaaaaaaaccaaaa0aaa0aaaa0aaa0addd333aa
+a4448044a44448aaa44444aa444444aa444444aa444448aa444448aa444448aaa44448aaa4448044aaa0faaaaaaaaaaaaaaccaaaaa000aaaaaa000aaa11333aa
+a44448aa444444aa444aaaaa44aaaaaa44aaa4aa444444aaa4a444aa44a444aaa4a44aaaa4a448aaaaaffaaaaaa0faaaaaaccaaaaaaaaaaaaaaaaaaaa10aaaaa
+aaa44aaa44aaaaaa44aaaaaaaaaaaaaaaaaaaaaaaaaaa4aaaaaaa4aaa4aa4aaaa4aa4aaaaa4a4aaaaa222aaaaaaffaaaaaa11aaaaaaaaaaaaaaaaaaa11aaaaaa
+aaaaa9aaaaaaa4aaaaaaaaaaaaaaaaaa000000000000000000000000565555555050505050505050a2a222faaa222aaaaaa22aaaaaa22aaaaaa22aaaaa222aaa
+aaaa979aaaaa474aaaaaaaaaaaaaaaaa000000000000000000000000555556550505050505050505afa22aaaaaf22aaaaaa22aaaaaa22aaaaa222aaaaaf222fa
+aaaa9779aaaa4774aaaafaaaaaaaa0aa000000000000000000000000555555555050505050505050aaa22aaaaaa22faaaaa22aaaaaa22aaaaa222aaaaaa22aaa
+aaa97eeaaaa4722aaaaaffaa4aaaa44a000000000000000000000000555555550505050505050505aaaccaaaaaa22aaaaaaf2aaaaaa2faaaaaf22faaaaacccaa
+a997eaaaa4472aaaaaafaaaa4a448040000000000000000000000000505050505050505050505050aaacacaaaaaccaaaaaaccaaaaaaccaaaaaaccaaaaaacacaa
+977eaaaa4772aaaaaffaaaaaa4448044000000000000000000000000050505050505050505050505a1caaacaaaaccaaaaaaccaaaaaaccaaaaaacacaaaacaaa1a
+a96eaaaaa462aaaaaafaaaaaa44448aa000000000000000000000000505050505555555550505050aaaaaaa1aa1cacaaaaa1caaaaaac1aaaaacaa1aaaa1aaaaa
+aaeaaaaaaa2aaaaaaaaaaaaaaa44a4aa000000000000000000000000050505055555555505050505aaaaaaaaaaaaa1aaaaaa1aaaaaa1aaaaaa1aaaaaaaaaaaaa
 aaa06666aaaaaaaaaaaaaaaaaaa11aaaaa5666655454454444444444aaa06665aaa0000000000000000000000000000000000000000000004545454545454545
 aaa06555aaaaaaaaaaaaaaaaa111d11aaa5666654545444444444444aaa06565aaa0655560f01050501010101040101010101010101010064444445544444444
 aaa06665aaaaaaaaaaaaaaa11dd11dd1aaa566655444444444444444aaa06665aaa06666600f0105010101010202010101010101010102064444444544444444
@@ -3119,9 +3286,6 @@ f3f66666665556050500655555666666666666666666666666666666666666665555560505006555
 66666666666666666666666666666666666666666666666666666666666666666666666666666666665555550005555555555500055555666666666666666666
 66666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666
 
-__gff__
-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000101010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __map__
 1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111
 1212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212

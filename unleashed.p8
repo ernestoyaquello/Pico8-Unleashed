@@ -1,7 +1,7 @@
 pico-8 cartridge // http://www.pico-8.com
 version 41
 __lua__
--- unleashed --
+-- unleashed game --
 
 function init(initial_state)
  state=initial_state
@@ -1148,137 +1148,7 @@ function create_dog(x,bottom_y)
  return dog
 end
 -->8
--- building info --
-
-function create_building(x,y)
- local instance={
-  x=x,
-  y=y,
-  width=7*8,
-  height=13*8,
- }
-
- local roof={
-  {colswap=mil},
-  {0,65,66,67,-66,-65,0},
-  {80,81,82,83,-82,-81,-80},
-  {97,82,82,83,-82,-82,-97},
-  {97,82,82,83,-82,-82,-97},
-  {97,82,98,99,-98,-82,-97},
- }
-
- -- make chimneys appear
- local chimney=flr(rnd(3))
- if chimney==1 then
-  local off=flr(rnd(2))
-  local off2=flr(rnd(2))
-  if(off2==0) off=1
-  roof[3+off][2+off2]=107
-  roof[4+off][2+off2]=123
- elseif chimney==2 then
-  local off=flr(rnd(2))
-  local off2=flr(rnd(2))
-  if(off2==0) off=1
-  roof[3+off][6-off2]=-107
-  roof[4+off][6-off2]=-123
- end
-
- -- switch brick color
- local brick_cs=mil
- if flr(rnd(2))==0 then
-  if flr(rnd(2))==0 then
-   brick_cs={{4,3}}
-  else
-   brick_cs={{4,13}}
-  end
- end
-
- local facade={
-  {colswap=brick_cs},
-  {112,113,114,115,-114,-113,-112},
-  {68,69,70,87,-70,-69,-68},
-  {84,85,86,87,-86,-85,-84},
-  {100,101,102,103,-102,-101,-100},
- }
- 
- -- replace rose windows
- local rosew=flr(rnd(2))
- if rosew==1 then
-  facade[2][4]=121
- end
- 
- local ground={
-  {colswap=brick_cs},
-  {64,-78,-79,122,79,78,-64},
-  {71,85,86,87,95,94,-71},
-  {71,101,102,96,111,110,-71},
-  {124,106,106,106,127,126,-124},
- }
- 
- -- use pub as ground floor
- local pub=flr(rnd(20))==10
- if pub then
-  -- switch pub sign bg color
-  local pub_bg_cs=mil
-  local pub_bg_cs_rnd=flr(rnd(3))
-  if pub_bg_cs_rnd==0 then
-   pub_bg_cs={{8,1}}
-  elseif pub_bg_cs_rnd==1 then
-   pub_bg_cs={{8,2}}
-  end
-  -- make sure ground is a pub
-  ground={
-   {colswap=pub_bg_cs},
-   {116,117,118,119,120,117,-116},
-   {72,73,74,75,76,77,-72},
-   {88,89,90,91,92,93,-88},
-   {104,105,106,106,106,-105,-104},
-  }
- end
- 
- -- use alternative windows
- local altw=flr(rnd(2))
- if altw==1 then
-  facade[4][2]=108
-  facade[4][3]=109
-  facade[4][6]=-108
-  facade[4][5]=-109
-  facade[5][3]=125
-  facade[5][5]=-125
-  if not pub then
-   ground[3][2]=108
-   ground[3][3]=109
-   ground[4][3]=125
-  end
- end
- 
- -- flip ground layout
- local flipg=flr(rnd(2))
- if not pub and flipg==1 then
-  for i=2,#ground do
-   local new_gr_row={}
-   for j=#ground[i],1,-1 do
-    add(new_gr_row,-ground[i][j])
-   end
-   ground[i]=new_gr_row
-  end
- end
-
- instance._draw=function()
-  local offset={
-   x=instance.x,
-   y=instance.y,
-   z=0,
-  }
-  offset=draw_sprts(roof,offset)
-  offset=draw_sprts(facade,offset)
-  offset=draw_sprts(ground,offset)
- end
- 
- return instance
-end
--->8
--- leash info --
+-- dog's leash info --
 
 local leash_length=10
 
@@ -1522,6 +1392,440 @@ function create_leash(dog_x,dog_y,dog_z)
  end
 
  return leash
+end
+-->8
+-- human info --
+
+local sprts={
+ {{colswap=nil},{42},{58}},
+ {{colswap=nil},{43},{59}},
+ {{colswap=nil},{43},{60}},
+ {{colswap=nil},{43},{61}},
+ {{colswap=nil},{43},{62}},
+ {{colswap=nil},{42},{63}},
+}
+
+local function spr_duration()
+ if scroll_speed!=0 then
+  return (#sprts-1)/scroll_speed
+ end
+ return -1
+end
+
+local function update(inst)
+ -- apply velocity deltas
+ if state=="play" then
+  inst.x+=scroll_speed
+ end
+ inst.x+=inst.dx
+ inst.y+=inst.dy
+ inst.z+=inst.dz
+ 
+ if state=="play" then
+  -- follow the dog vertically
+  inst.dy=(dog.y-inst.y-8)/8
+ elseif state=="game over" then
+  -- get next to the dog to
+  -- hold it by the leash
+  inst.dx=(dog.x-inst.x-11)/18
+  inst.dy=(dog.y-inst.y-8)/5
+ end
+ 
+ -- apply gravity
+ inst.dz+=gravity
+ if inst.z>=inst.floor_z then
+  inst.z=inst.floor_z
+  inst.dz=0
+ end
+ 
+ -- detect if the human is
+ -- currently colliding with
+ -- an obstacle to make sure
+ -- he is moved to be on top
+ -- of it if needed
+ inst.floor_z=0
+ local collided=false
+ local cp={inst.x+5,inst.y+15,0}
+ for o in all(obstacles) do
+  if o.type=="scaffold"
+  or o.dx<0
+  then
+   local col=nil
+   if o.type!="scaffold" then
+    col=o._collision(
+     cp[1],cp[2],cp[3]
+    )
+   else
+    col=o._collision(
+     cp[1],cp[2]-2,cp[3]
+    )
+   end
+   if col!=nil then
+    if o.v_type=="car" then
+     -- the obstacle "roof" is
+     -- now the  floor for the
+     -- human
+     inst.floor_z=col[3]
+
+     -- see if the human is
+     -- or should be on top of
+     -- the obstacle, ensuring
+     -- he is if needed
+     if col[3]<=inst.z then
+      inst.z=col[3]
+      inst.dz=min(inst.dz,0)
+     end
+    else
+     -- avoid trespassing
+     -- inside the obstacle
+     inst.y+=col[2]
+    end
+
+    -- collision found, end
+    -- the loop
+    collided=true
+    break
+   end
+  end
+ end
+ 
+ -- detect if the human will
+ -- collide with an obstacle
+ -- soon to make him jump or
+ -- move if needed
+ if not collided
+ and state=="play"
+ then
+  local cp_future={
+   cp[1]+(18*scroll_speed),
+   cp[2]+(10*inst.dy),
+   0,
+  }
+  for o in all(obstacles) do
+   col=nil
+   if o.type!="scaffold" then
+    col=o._collision(
+     cp_future[1],
+     cp_future[2],
+     cp_future[3]
+    )
+   else
+    col=o._collision(
+     cp_future[1],
+     cp_future[2]-2,
+     cp_future[3]
+    )
+   end
+   if col!=nil then
+    if o.v_type=="car" then
+     if col[3]<0
+     and inst.z==0
+     and inst.dz==0
+     then
+      -- make the human jump
+      -- to avoid the car
+      -- he is heading towards
+      inst.dz=-jump_acc*1.2
+      
+      -- collision found, end
+      -- the loop
+      break
+     end
+    else
+     if col[2]>0
+     and inst.dy<=0
+     then
+      -- push human away from
+      -- the obstacle
+      local push=col[2]-(cp[2]-cp_future[2])
+      inst.y+=push/3
+     end
+    end
+   end
+  end
+ end
+
+ -- update sprites
+ local running=scroll_speed>0
+  and (state=="play"
+   or state=="intro"
+   or (state=="game over"
+    and (abs(dog.x-inst.x-11)>1
+     or abs(dog.y-inst.y-8)>1)))
+ if running then
+  inst.spr_aux+=1
+  local frames_per_sprite=spr_duration()
+  if frames_per_sprite<=0 then
+   inst.sprites=sprts[2]
+  else
+   if inst.spr_aux>#sprts*frames_per_sprite then
+    inst.spr_aux=frames_per_sprite
+   end
+   inst.spr_index=min(
+    #sprts,
+    flr(inst.spr_aux/frames_per_sprite+0.5)
+   )
+  end
+ else
+  -- not running, still pose
+  inst.spr_index=nil
+ end
+ 
+ -- update the shadow color,
+ -- which will depend on the
+ -- surface the human is on top
+ -- of
+ inst.shad_col=5
+ if inst.y+8<113 and inst.y+8>40 then
+  inst.shad_col=0
+ elseif inst.floor_z!=0 then
+  inst.shad_col=1
+ end
+end
+
+local function draw(inst)
+ -- draw shadow
+ ovalfill(
+  inst.x+2,
+  inst.y+14+inst.floor_z,
+  inst.x+6,
+  inst.y+16+inst.floor_z,
+  inst.shad_col
+ )
+ 
+ -- draw sprites for the human
+ local offset={
+  x=inst.x,
+  y=inst.y,
+  z=inst.z,
+ }
+ local n_sprts={
+  -- still pose by default
+  {colswap=nil},{43},{44},
+ }
+ if inst.spr_index!=nil then
+  n_sprts=sprts[inst.spr_index]
+ end
+ draw_sprts(n_sprts,offset)
+end
+
+function create_human(x,bottom_y)
+ local instance={
+  x=x,
+  y=bottom_y-16,
+  z=0,
+  dx=0,
+  dy=0,
+  dz=0,
+  floor_z=0,
+  spr_aux=spr_duration(),
+  spr_index=1,
+  shad_col=5,
+ }
+ 
+ instance._update=function()
+  update(instance)
+ end
+
+ instance._draw=function()
+  draw(instance)
+ end
+ 
+ return instance
+end
+-->8
+-- building info --
+
+function create_building(x,y)
+ local instance={
+  x=x,
+  y=y,
+  width=7*8,
+  height=13*8,
+ }
+
+ local roof={
+  {colswap=mil},
+  {0,65,66,67,-66,-65,0},
+  {80,81,82,83,-82,-81,-80},
+  {97,82,82,83,-82,-82,-97},
+  {97,82,82,83,-82,-82,-97},
+  {97,82,98,99,-98,-82,-97},
+ }
+
+ -- make chimneys appear
+ local chimney=flr(rnd(3))
+ if chimney==1 then
+  local off=flr(rnd(2))
+  local off2=flr(rnd(2))
+  if(off2==0) off=1
+  roof[3+off][2+off2]=107
+  roof[4+off][2+off2]=123
+ elseif chimney==2 then
+  local off=flr(rnd(2))
+  local off2=flr(rnd(2))
+  if(off2==0) off=1
+  roof[3+off][6-off2]=-107
+  roof[4+off][6-off2]=-123
+ end
+
+ -- switch brick color
+ local brick_cs=mil
+ if flr(rnd(2))==0 then
+  if flr(rnd(2))==0 then
+   brick_cs={{4,3}}
+  else
+   brick_cs={{4,13}}
+  end
+ end
+
+ local facade={
+  {colswap=brick_cs},
+  {112,113,114,115,-114,-113,-112},
+  {68,69,70,87,-70,-69,-68},
+  {84,85,86,87,-86,-85,-84},
+  {100,101,102,103,-102,-101,-100},
+ }
+ 
+ -- replace rose windows
+ local rosew=flr(rnd(2))
+ if rosew==1 then
+  facade[2][4]=121
+ end
+ 
+ local ground={
+  {colswap=brick_cs},
+  {64,-78,-79,122,79,78,-64},
+  {71,85,86,87,95,94,-71},
+  {71,101,102,96,111,110,-71},
+  {124,106,106,106,127,126,-124},
+ }
+ 
+ -- use pub as ground floor
+ local pub=flr(rnd(20))==10
+ if pub then
+  -- switch pub sign bg color
+  local pub_bg_cs=mil
+  local pub_bg_cs_rnd=flr(rnd(3))
+  if pub_bg_cs_rnd==0 then
+   pub_bg_cs={{8,1}}
+  elseif pub_bg_cs_rnd==1 then
+   pub_bg_cs={{8,2}}
+  end
+  -- make sure ground is a pub
+  ground={
+   {colswap=pub_bg_cs},
+   {116,117,118,119,120,117,-116},
+   {72,73,74,75,76,77,-72},
+   {88,89,90,91,92,93,-88},
+   {104,105,106,106,106,-105,-104},
+  }
+ end
+ 
+ -- use alternative windows
+ local altw=flr(rnd(2))
+ if altw==1 then
+  facade[4][2]=108
+  facade[4][3]=109
+  facade[4][6]=-108
+  facade[4][5]=-109
+  facade[5][3]=125
+  facade[5][5]=-125
+  if not pub then
+   ground[3][2]=108
+   ground[3][3]=109
+   ground[4][3]=125
+  end
+ end
+ 
+ -- flip ground layout
+ local flipg=flr(rnd(2))
+ if not pub and flipg==1 then
+  for i=2,#ground do
+   local new_gr_row={}
+   for j=#ground[i],1,-1 do
+    add(new_gr_row,-ground[i][j])
+   end
+   ground[i]=new_gr_row
+  end
+ end
+
+ instance._draw=function()
+  local offset={
+   x=instance.x,
+   y=instance.y,
+   z=0,
+  }
+  offset=draw_sprts(roof,offset)
+  offset=draw_sprts(facade,offset)
+  offset=draw_sprts(ground,offset)
+ end
+ 
+ return instance
+end
+-->8
+-- scaffolding info --
+
+function create_scaffold(x,y)
+ -- define number of scaffolds
+ local num_blocks=2+flr(rnd(5))
+ local instance={
+  x=x,
+  y=y,
+  z=0,
+  dx=0,
+  col_x_ofst=14,
+  width=32+num_blocks*12,
+  height=25,
+  type="scaffold",
+ }
+ 
+ instance._update=function()
+ end
+
+ instance._draw=function()
+  -- draw first diversion sign
+  spr(242,instance.x,instance.y+6)
+  
+  -- draw scaffolding blocks
+  local x=instance.x+16
+  for i=1,num_blocks do
+   sspr(
+    0,
+    96,
+    13,
+    32,
+    x,
+    instance.y-15
+   )
+   x+=12
+   
+   -- stop drawing if the next
+   -- block is off screen
+   if x>cam_x+128+scroll_speed then
+    return
+   end
+  end
+  
+  -- if we have drawn all the
+  -- blocks, also draw the
+  -- last diversion sign
+  spr(242,x+8,instance.y+6,1,1,true)
+ end
+
+ instance._collision=function(x,y,z)
+  return collision(
+   x,y,z,
+   instance.x+instance.col_x_ofst,
+   instance.x+instance.width-12,
+   instance.y,--+11
+   instance.y+16,
+   0,
+   -instance.height
+  )
+ end
+ 
+ return instance
 end
 -->8
 -- vehicle info --
@@ -1777,421 +2081,6 @@ function create_bike(x,y,speed)
  return instance
 end
 -->8
--- helpers --
-
--- drawing helper to draw
--- multiple sprites as a single
--- element. each row will be
--- drawn as a row, starting
--- from the second one (the
--- first row indicates color
--- swaps). negative values
--- indicate horizontal flip.
-function draw_sprts(sprts,offset)
- local colswap=sprts[1].colswap
- if colswap~=nil then
-  for col in all(colswap) do
-   -- apply color swap
-   pal(col[1],col[2])
-  end
- end
- local col,row=0,0
- while row<#sprts-1 do
-  while col<#sprts[row+2] do
-   local sprite=sprts[row+2][col+1]
-   spr(
-    abs(sprite),
-    col*8+offset.x,
-    (row*8+offset.y)+offset.z,
-    1,1,
-    sprite<0
-   )
-   col+=1
-  end
-  row+=1
-  col=0
- end
- if colswap~=nil then
-  for col in all(colswap) do
-   -- restore color after swap
-   pal(col[1],col[1])
-  end
- end
- 
- return {
-  x=col*8+offset.x,
-  y=row*8+offset.y,
-  z=offset.z,
- }
-end
-
--- returns a table with the
--- {x,y,z} diffs needed to
--- correct the position of the
--- point defined by x,y,z in
--- order to stop its collision
--- with the 3d prism defined by
--- the other parameters, or nil
--- if there is no collision.
-function collision(
- x,y,z,
- obs_x,obs_x2,
- obs_y,obs_y2,
- obs_z,obs_z2
-)
- local fix={}
-
- -- correct the x, pushing the
- -- point left or right
- -- (whichever way the x move
- -- is shorter).
- if x>=obs_x and x<=obs_x2 then
-  if abs(x-obs_x)<abs(x-obs_x2) then
-   -- push left
-   fix[1]=obs_x-x
-   fix[1]=min(fix[1],-0.5)
-  else
-   -- push right
-   fix[1]=obs_x2-x
-   fix[1]=max(fix[1],0.5)
-  end
- else
-  -- no collision found
-  return nil
- end
-
- -- correct the y, pushing the
- -- point up or down (whichever
- -- way the y move is shorter).
- if y>=obs_y and y<=obs_y2 then
-  if abs(y-obs_y)<abs(y-obs_y2) then
-   -- push up
-   fix[2]=obs_y-y
-   fix[2]=min(fix[2],-0.5)
-  else
-   -- push down
-   fix[2]=obs_y2-y
-   fix[2]=max(fix[2],0.5)
-  end
- else
-  -- no collision found
-  return nil
- end
-
- -- correct the z, pushing the
- -- point upwards in the air
- -- when needed.
- if z<=obs_z and z>=obs_z2 then
-  fix[3]=obs_z2-z
-  fix[3]=min(fix[3],-0.5)
- else
-  -- no collision found
-  return nil
- end
-
- return fix
-end
-
--- performs a simple transition
--- to allow moving from one
--- screen to another nicely
-function transition(x,y,exit)
- local patterns={
-  0b1111111111111111.1,
-  0b0111011101110111.1,
-  0b0011001100110011.1,
-  0b0001000100010001.1,
-  0b0000000000000000.1,
- }
- 
- local start=patterns[1]
- if not exit then
-  local start=patterns[#patterns]
- end
- 
- local instance={
-  x=x,
-  y=y,
-  counter=0,
-  current=start,
-  finished=false,
- }
-
- instance._update=function()
-  local i=flr(instance.counter/5)+1
-  if not exit then
-   -- the order for the
-   -- patterns is inverted
-   -- for enter transitions
-   i=#patterns-i+1
-  end
-  
-  if i>=1 and i<=#patterns then
-   instance.current=patterns[i]
-   instance.counter+=1
-  else
-   instance.finished=true
-  end
- end
- 
- instance._draw=function()
-  -- draw black vertical lines
-  fillp(instance.current)
-  rectfill(
-   instance.x,
-   instance.y,
-   instance.x+127,
-   instance.y+127,
-   0
-  )
-  
-  -- restore everything
-  fillp(0b0000000000000000)
- end
- 
- return instance
-end
--->8
--- human info --
-
-local sprts={
- {{colswap=nil},{42},{58}},
- {{colswap=nil},{43},{59}},
- {{colswap=nil},{43},{60}},
- {{colswap=nil},{43},{61}},
- {{colswap=nil},{43},{62}},
- {{colswap=nil},{42},{63}},
-}
-
-local function spr_duration()
- if scroll_speed!=0 then
-  return (#sprts-1)/scroll_speed
- end
- return -1
-end
-
-local function update(inst)
- -- apply velocity deltas
- if state=="play" then
-  inst.x+=scroll_speed
- end
- inst.x+=inst.dx
- inst.y+=inst.dy
- inst.z+=inst.dz
- 
- if state=="play" then
-  -- follow the dog vertically
-  inst.dy=(dog.y-inst.y-8)/8
- elseif state=="game over" then
-  -- get next to the dog to
-  -- hold it by the leash
-  inst.dx=(dog.x-inst.x-11)/18
-  inst.dy=(dog.y-inst.y-8)/5
- end
- 
- -- apply gravity
- inst.dz+=gravity
- if inst.z>=inst.floor_z then
-  inst.z=inst.floor_z
-  inst.dz=0
- end
- 
- -- detect if the human is
- -- currently colliding with
- -- an obstacle to make sure
- -- he is moved to be on top
- -- of it if needed
- inst.floor_z=0
- local collided=false
- local cp={inst.x+5,inst.y+15,0}
- for o in all(obstacles) do
-  if o.type=="scaffold"
-  or o.dx<0
-  then
-   local col=nil
-   if o.type!="scaffold" then
-    col=o._collision(
-     cp[1],cp[2],cp[3]
-    )
-   else
-    col=o._collision(
-     cp[1],cp[2]-2,cp[3]
-    )
-   end
-   if col!=nil then
-    if o.v_type=="car" then
-     -- the obstacle "roof" is
-     -- now the  floor for the
-     -- human
-     inst.floor_z=col[3]
-
-     -- see if the human is
-     -- or should be on top of
-     -- the obstacle, ensuring
-     -- he is if needed
-     if col[3]<=inst.z then
-      inst.z=col[3]
-      inst.dz=min(inst.dz,0)
-     end
-    else
-     -- avoid trespassing
-     -- inside the obstacle
-     inst.y+=col[2]
-    end
-
-    -- collision found, end
-    -- the loop
-    collided=true
-    break
-   end
-  end
- end
- 
- -- detect if the human will
- -- collide with an obstacle
- -- soon to make him jump or
- -- move if needed
- if not collided
- and state=="play"
- then
-  local cp_future={
-   cp[1]+(18*scroll_speed),
-   cp[2]+(10*inst.dy),
-   0,
-  }
-  for o in all(obstacles) do
-   col=nil
-   if o.type!="scaffold" then
-    col=o._collision(
-     cp_future[1],
-     cp_future[2],
-     cp_future[3]
-    )
-   else
-    col=o._collision(
-     cp_future[1],
-     cp_future[2]-2,
-     cp_future[3]
-    )
-   end
-   if col!=nil then
-    if o.v_type=="car" then
-     if col[3]<0
-     and inst.z==0
-     and inst.dz==0
-     then
-      -- make the human jump
-      -- to avoid the car
-      -- he is heading towards
-      inst.dz=-jump_acc*1.2
-      
-      -- collision found, end
-      -- the loop
-      break
-     end
-    else
-     if col[2]>0
-     and inst.dy<=0
-     then
-      -- push human away from
-      -- the obstacle
-      local push=col[2]-(cp[2]-cp_future[2])
-      inst.y+=push/3
-     end
-    end
-   end
-  end
- end
-
- -- update sprites
- local running=scroll_speed>0
-  and (state=="play"
-   or state=="intro"
-   or (state=="game over"
-    and (abs(dog.x-inst.x-11)>1
-     or abs(dog.y-inst.y-8)>1)))
- if running then
-  inst.spr_aux+=1
-  local frames_per_sprite=spr_duration()
-  if frames_per_sprite<=0 then
-   inst.sprites=sprts[2]
-  else
-   if inst.spr_aux>#sprts*frames_per_sprite then
-    inst.spr_aux=frames_per_sprite
-   end
-   inst.spr_index=min(
-    #sprts,
-    flr(inst.spr_aux/frames_per_sprite+0.5)
-   )
-  end
- else
-  -- not running, still pose
-  inst.spr_index=nil
- end
- 
- -- update the shadow color,
- -- which will depend on the
- -- surface the human is on top
- -- of
- inst.shad_col=5
- if inst.y+8<113 and inst.y+8>40 then
-  inst.shad_col=0
- elseif inst.floor_z!=0 then
-  inst.shad_col=1
- end
-end
-
-local function draw(inst)
- -- draw shadow
- ovalfill(
-  inst.x+2,
-  inst.y+14+inst.floor_z,
-  inst.x+6,
-  inst.y+16+inst.floor_z,
-  inst.shad_col
- )
- 
- -- draw sprites for the human
- local offset={
-  x=inst.x,
-  y=inst.y,
-  z=inst.z,
- }
- local n_sprts={
-  -- still pose by default
-  {colswap=nil},{43},{44},
- }
- if inst.spr_index!=nil then
-  n_sprts=sprts[inst.spr_index]
- end
- draw_sprts(n_sprts,offset)
-end
-
-function create_human(x,bottom_y)
- local instance={
-  x=x,
-  y=bottom_y-16,
-  z=0,
-  dx=0,
-  dy=0,
-  dz=0,
-  floor_z=0,
-  spr_aux=spr_duration(),
-  spr_index=1,
-  shad_col=5,
- }
- 
- instance._update=function()
-  update(instance)
- end
-
- instance._draw=function()
-  draw(instance)
- end
- 
- return instance
-end
--->8
 -- bone info --
 
 local sprts={49,48}
@@ -2312,306 +2201,6 @@ function create_bone(
     instance.z-9
    )
   end
- end
- 
- return instance
-end
--->8
--- game over message info --
-
-local function update(inst)
- -- allow the user to skip the
- -- animation with a button
- -- press once the first line
- -- has already been shown (its
- -- animation won't be
- -- skippable, but it will
- -- last very very little, so
- -- that's fine actually)
- local skip_anim=(btn(❎) or btn(🅾️))
-  and inst.texts_to_show_chars>=28
-  and inst.shake==0
- if skip_anim then
-  -- no pause needed when
-  -- skipping animations
-  inst.temp_pause=0
- end
- 
- -- message is in right place
- inst.x=human.x-human_offset_x+3
- inst.y=35
- 
- -- make the rectangle expand
- -- if needed:
- local target_x2=human.x-human_offset_x+123
- local target_y2=99
-
- -- 1.a get closer to x target
- if not skip_anim
- and inst.x2<target_x2
- and inst.temp_pause==0
- then
-  inst.x2+=8
- end
-
- -- 1.b ...or reach x target
- if inst.x2>=target_x2
- or skip_anim
- then
-  inst.x2=target_x2
- end
-
- -- 2.a get closer to y target
- if not skip_anim
- and inst.y2<target_y2
- and inst.temp_pause==0
- then
-  inst.y2+=1.5
- end
- 
- -- 2.b ...or reach y target
- if inst.y2>=target_y2
- or skip_anim
- then
-  inst.y2=target_y2
- end
-
- -- ensure text is shown once
- -- the rectangle is expanded
- -- to its target size, making
- -- sure to make it appear
- -- one character at a time
- local show_text=inst.x2==target_x2
-  and (inst.y2==target_y2
-   or (inst.texts_to_show_chars==0))
- if show_text then
-  if skip_anim then
-   -- skip the text animation
-   -- and show all the text
-   -- directly
-   inst.texts_to_show_chars=28*5
-   -- ensure message about
-   -- pressing to restart
-   -- appears immediately
-   inst.counter=50
-  elseif inst.temp_pause==0 then
-   local total_chars=#inst.texts*28
-   if inst.texts_to_show_chars<=total_chars then
-    -- show next character, or
-    -- the whole line (28
-    -- characters) if this is
-    -- the first line
-    if inst.texts_to_show_chars>0 then
-     inst.texts_to_show_chars+=1
-    else
-     inst.texts_to_show_chars=28
-     -- ensure the first line is
-     -- shaken when shown (for
-     -- dramatic effect, as it
-     -- is the line that tells
-     -- the user about the game
-     -- over)
-     inst.shake=1
-    end
-    
-    -- make a sound as soon as
-    -- a line is almost fully
-    -- shown, except for the
-    -- first line, as it
-    -- doesn't show a score
-    if inst.texts_to_show_chars>28
-    and inst.texts_to_show_chars%25==0
-    then
-     sfx(2)
-    end
-    
-    -- check if a new line
-    -- has been reached, and
-    -- if so, make a pause
-    -- before the next one
-    -- (unless this is the
-    -- last one, in which case
-    -- no pause after it is
-    -- needed)
-    if inst.texts_to_show_chars<total_chars 
-    and inst.texts_to_show_chars%28==0
-    then
-     inst.temp_pause=30
-    end
-   end
-  end
-
-  -- ugly code to ensure
-  -- characters are shown one
-  -- by one
-  inst.texts_to_show={}
-  local all_text_shown=true
-  local aux_count=inst.texts_to_show_chars
-  for _,text in ipairs(inst.texts) do
-   inst.texts_to_show[#inst.texts_to_show+1]={text[1],""}
-   local aux_text=""
-   local i_max=min(#text[2],aux_count)
-   for i=1,i_max do
-    aux_text=aux_text..text[2][i]
-    aux_count-=1
-   end
-   inst.texts_to_show[#inst.texts_to_show][2]=aux_text
-   if aux_count==0 then
-    all_text_shown=false
-    break
-   end
-  end
-  if all_text_shown
-  and not inst.finished
-  then
-   -- the game over information
-   -- is all on the screen now,
-   -- so the user will be able
-   -- to restart the game
-   inst.finished=true
-   
-   -- if this is a new record,
-   -- take a screenshot
-   if dget(0)==meters+10*bones_count then
-    extcmd("screen")
-   end
-  end
- end
- 
- -- increment counter that will
- -- be used to animate the
- -- "press button to restart"
- -- text
- if inst.finished then
-  inst.counter+=1
-  if inst.counter>120 then
-   inst.counter=0
-  end
- end
- 
- -- progress the temporary
- -- pause by reducing it if
- -- needed (when zero, the
- -- pause will be considered
- -- finished)
- if inst.temp_pause>0 then
-  inst.temp_pause-=1
- end
- 
- -- shake the text if needed
- if inst.shake!=0 then
-  inst.text_offset_x=4-rnd(8)
-  inst.text_offset_y=4-rnd(8)
-  inst.text_offset_x*=inst.shake
-  inst.text_offset_y*=inst.shake
-  
-  inst.shake/=1.6
-  if inst.shake<0.05 then
-   inst.shake=0
-   inst.text_offset_x=0
-   inst.text_offset_y=0
-  end
- end
-end
-
-local function draw(inst)
- -- draw background rectangle,
- -- its border and its shadow
- rectfill(
-  inst.x+1,
-  inst.y+1,
-  inst.x2-1,
-  inst.y2-1,
-  0
- )
- rect(
-  inst.x+1,
-  inst.y+1,
-  inst.x2+1,
-  inst.y2+1,
-  0
- )
- rect(
-  inst.x,
-  inst.y,
-  inst.x2,
-  inst.y2,
-  2
- )
-
- -- draw the texts with the
- -- game over information
- if inst.texts_to_show!=nil then
-  local text_y=inst.y+6
-  for i,text in ipairs(inst.texts_to_show) do
-   local y_offset=0
-   if i==1 then
-    y_offset=2
-   end
-   print(
-    text[2],
-    inst.x+5+inst.text_offset_x,
-    text_y+y_offset+inst.text_offset_x,
-    text[1]
-   )
-   text_y+=11+2*y_offset
-  end
- end
- 
- -- draw the blinking text
- -- that tells the user to
- -- press a button to restart
- if inst.finished
- and inst.counter>50
- then
-  local msg="press to restart"
-  print(msg,inst.x+27,inst.y+85,0)
-  print(msg,inst.x+26,inst.y+84,7)
- end
-end
-
-function create_game_over_msg()
- -- adds dots between a and b
- -- to ensure the final string
- -- is exactly 28 characters
- -- long
- local function concat(a,b)
-  local result=a
-  for _=1,28-#a-#b do
-   result=result.."."
-  end
-  return result..b
- end
-
- local texts={
-  {13, "    you've been caught!     "},
-  {7,concat("distance","1 x "..meters.." = "..meters)},
-  {15,concat("bones","10 x "..bones_count.." = "..(10*bones_count))},
-  {14,concat("total score",tostr(meters+10*bones_count))},
-  {14,concat("personal best",tostr(dget(0)))},
- }
- local instance={
-  x=human.x-human_offset_x+3,
-  y=35,
-  x2=human.x-human_offset_x+3,
-  y2=35,
-  texts=texts,
-  texts_to_show=nil,
-  texts_to_show_chars=0,
-  finished=false,
-  counter=0,
-  temp_pause=10,
-  shake=0,
-  text_offset_x=0,
-  text_offset_y=0,
- }
- 
- instance._update=function()
-  update(instance)
- end
-
- instance._draw=function()
-  draw(instance)
  end
  
  return instance
@@ -2964,65 +2553,476 @@ function create_intro_screen()
  return instance
 end
 -->8
--- scaffolding info --
+-- game over message info --
 
-function create_scaffold(x,y)
- -- define number of scaffolds
- local num_blocks=2+flr(rnd(5))
+local function update(inst)
+ -- allow the user to skip the
+ -- animation with a button
+ -- press once the first line
+ -- has already been shown (its
+ -- animation won't be
+ -- skippable, but it will
+ -- last very very little, so
+ -- that's fine actually)
+ local skip_anim=(btn(❎) or btn(🅾️))
+  and inst.texts_to_show_chars>=28
+  and inst.shake==0
+ if skip_anim then
+  -- no pause needed when
+  -- skipping animations
+  inst.temp_pause=0
+ end
+ 
+ -- message is in right place
+ inst.x=human.x-human_offset_x+3
+ inst.y=35
+ 
+ -- make the rectangle expand
+ -- if needed:
+ local target_x2=human.x-human_offset_x+123
+ local target_y2=99
+
+ -- 1.a get closer to x target
+ if not skip_anim
+ and inst.x2<target_x2
+ and inst.temp_pause==0
+ then
+  inst.x2+=8
+ end
+
+ -- 1.b ...or reach x target
+ if inst.x2>=target_x2
+ or skip_anim
+ then
+  inst.x2=target_x2
+ end
+
+ -- 2.a get closer to y target
+ if not skip_anim
+ and inst.y2<target_y2
+ and inst.temp_pause==0
+ then
+  inst.y2+=1.5
+ end
+ 
+ -- 2.b ...or reach y target
+ if inst.y2>=target_y2
+ or skip_anim
+ then
+  inst.y2=target_y2
+ end
+
+ -- ensure text is shown once
+ -- the rectangle is expanded
+ -- to its target size, making
+ -- sure to make it appear
+ -- one character at a time
+ local show_text=inst.x2==target_x2
+  and (inst.y2==target_y2
+   or (inst.texts_to_show_chars==0))
+ if show_text then
+  if skip_anim then
+   -- skip the text animation
+   -- and show all the text
+   -- directly
+   inst.texts_to_show_chars=28*5
+   -- ensure message about
+   -- pressing to restart
+   -- appears immediately
+   inst.counter=50
+  elseif inst.temp_pause==0 then
+   local total_chars=#inst.texts*28
+   if inst.texts_to_show_chars<=total_chars then
+    -- show next character, or
+    -- the whole line (28
+    -- characters) if this is
+    -- the first line
+    if inst.texts_to_show_chars>0 then
+     inst.texts_to_show_chars+=1
+    else
+     inst.texts_to_show_chars=28
+     -- ensure the first line is
+     -- shaken when shown (for
+     -- dramatic effect, as it
+     -- is the line that tells
+     -- the user about the game
+     -- over)
+     inst.shake=1
+    end
+    
+    -- make a sound as soon as
+    -- a line is almost fully
+    -- shown, except for the
+    -- first line, as it
+    -- doesn't show a score
+    if inst.texts_to_show_chars>28
+    and inst.texts_to_show_chars%25==0
+    then
+     sfx(2)
+    end
+    
+    -- check if a new line
+    -- has been reached, and
+    -- if so, make a pause
+    -- before the next one
+    -- (unless this is the
+    -- last one, in which case
+    -- no pause after it is
+    -- needed)
+    if inst.texts_to_show_chars<total_chars 
+    and inst.texts_to_show_chars%28==0
+    then
+     inst.temp_pause=30
+    end
+   end
+  end
+
+  -- ugly code to ensure
+  -- characters are shown one
+  -- by one
+  inst.texts_to_show={}
+  local all_text_shown=true
+  local aux_count=inst.texts_to_show_chars
+  for _,text in ipairs(inst.texts) do
+   inst.texts_to_show[#inst.texts_to_show+1]={text[1],""}
+   local aux_text=""
+   local i_max=min(#text[2],aux_count)
+   for i=1,i_max do
+    aux_text=aux_text..text[2][i]
+    aux_count-=1
+   end
+   inst.texts_to_show[#inst.texts_to_show][2]=aux_text
+   if aux_count==0 then
+    all_text_shown=false
+    break
+   end
+  end
+  if all_text_shown
+  and not inst.finished
+  then
+   -- the game over information
+   -- is all on the screen now,
+   -- so the user will be able
+   -- to restart the game
+   inst.finished=true
+   
+   -- if this is a new record,
+   -- take a screenshot
+   if dget(0)==meters+10*bones_count then
+    extcmd("screen")
+   end
+  end
+ end
+ 
+ -- increment counter that will
+ -- be used to animate the
+ -- "press button to restart"
+ -- text
+ if inst.finished then
+  inst.counter+=1
+  if inst.counter>120 then
+   inst.counter=0
+  end
+ end
+ 
+ -- progress the temporary
+ -- pause by reducing it if
+ -- needed (when zero, the
+ -- pause will be considered
+ -- finished)
+ if inst.temp_pause>0 then
+  inst.temp_pause-=1
+ end
+ 
+ -- shake the text if needed
+ if inst.shake!=0 then
+  inst.text_offset_x=4-rnd(8)
+  inst.text_offset_y=4-rnd(8)
+  inst.text_offset_x*=inst.shake
+  inst.text_offset_y*=inst.shake
+  
+  inst.shake/=1.6
+  if inst.shake<0.05 then
+   inst.shake=0
+   inst.text_offset_x=0
+   inst.text_offset_y=0
+  end
+ end
+end
+
+local function draw(inst)
+ -- draw background rectangle,
+ -- its border and its shadow
+ rectfill(
+  inst.x+1,
+  inst.y+1,
+  inst.x2-1,
+  inst.y2-1,
+  0
+ )
+ rect(
+  inst.x+1,
+  inst.y+1,
+  inst.x2+1,
+  inst.y2+1,
+  0
+ )
+ rect(
+  inst.x,
+  inst.y,
+  inst.x2,
+  inst.y2,
+  2
+ )
+
+ -- draw the texts with the
+ -- game over information
+ if inst.texts_to_show!=nil then
+  local text_y=inst.y+6
+  for i,text in ipairs(inst.texts_to_show) do
+   local y_offset=0
+   if i==1 then
+    y_offset=2
+   end
+   print(
+    text[2],
+    inst.x+5+inst.text_offset_x,
+    text_y+y_offset+inst.text_offset_x,
+    text[1]
+   )
+   text_y+=11+2*y_offset
+  end
+ end
+ 
+ -- draw the blinking text
+ -- that tells the user to
+ -- press a button to restart
+ if inst.finished
+ and inst.counter>50
+ then
+  local msg="press to restart"
+  print(msg,inst.x+27,inst.y+85,0)
+  print(msg,inst.x+26,inst.y+84,7)
+ end
+end
+
+function create_game_over_msg()
+ -- adds dots between a and b
+ -- to ensure the final string
+ -- is exactly 28 characters
+ -- long
+ local function concat(a,b)
+  local result=a
+  for _=1,28-#a-#b do
+   result=result.."."
+  end
+  return result..b
+ end
+
+ local texts={
+  {13, "    you've been caught!     "},
+  {7,concat("distance","1 x "..meters.." = "..meters)},
+  {15,concat("bones","10 x "..bones_count.." = "..(10*bones_count))},
+  {14,concat("total score",tostr(meters+10*bones_count))},
+  {14,concat("personal best",tostr(dget(0)))},
+ }
  local instance={
-  x=x,
-  y=y,
-  z=0,
-  dx=0,
-  col_x_ofst=14,
-  width=32+num_blocks*12,
-  height=25,
-  type="scaffold",
+  x=human.x-human_offset_x+3,
+  y=35,
+  x2=human.x-human_offset_x+3,
+  y2=35,
+  texts=texts,
+  texts_to_show=nil,
+  texts_to_show_chars=0,
+  finished=false,
+  counter=0,
+  temp_pause=10,
+  shake=0,
+  text_offset_x=0,
+  text_offset_y=0,
  }
  
  instance._update=function()
+  update(instance)
  end
 
  instance._draw=function()
-  -- draw first diversion sign
-  spr(242,instance.x,instance.y+6)
-  
-  -- draw scaffolding blocks
-  local x=instance.x+16
-  for i=1,num_blocks do
-   sspr(
-    0,
-    96,
-    13,
-    32,
-    x,
-    instance.y-15
-   )
-   x+=12
-   
-   -- stop drawing if the next
-   -- block is off screen
-   if x>cam_x+128+scroll_speed then
-    return
-   end
+  draw(instance)
+ end
+ 
+ return instance
+end
+-->8
+-- helpers --
+
+-- drawing helper to draw
+-- multiple sprites as a single
+-- element. each row will be
+-- drawn as a row, starting
+-- from the second one (the
+-- first row indicates color
+-- swaps). negative values
+-- indicate horizontal flip.
+function draw_sprts(sprts,offset)
+ local colswap=sprts[1].colswap
+ if colswap~=nil then
+  for col in all(colswap) do
+   -- apply color swap
+   pal(col[1],col[2])
   end
-  
-  -- if we have drawn all the
-  -- blocks, also draw the
-  -- last diversion sign
-  spr(242,x+8,instance.y+6,1,1,true)
+ end
+ local col,row=0,0
+ while row<#sprts-1 do
+  while col<#sprts[row+2] do
+   local sprite=sprts[row+2][col+1]
+   spr(
+    abs(sprite),
+    col*8+offset.x,
+    (row*8+offset.y)+offset.z,
+    1,1,
+    sprite<0
+   )
+   col+=1
+  end
+  row+=1
+  col=0
+ end
+ if colswap~=nil then
+  for col in all(colswap) do
+   -- restore color after swap
+   pal(col[1],col[1])
+  end
+ end
+ 
+ return {
+  x=col*8+offset.x,
+  y=row*8+offset.y,
+  z=offset.z,
+ }
+end
+
+-- returns a table with the
+-- {x,y,z} diffs needed to
+-- correct the position of the
+-- point defined by x,y,z in
+-- order to stop its collision
+-- with the 3d prism defined by
+-- the other parameters, or nil
+-- if there is no collision.
+function collision(
+ x,y,z,
+ obs_x,obs_x2,
+ obs_y,obs_y2,
+ obs_z,obs_z2
+)
+ local fix={}
+
+ -- correct the x, pushing the
+ -- point left or right
+ -- (whichever way the x move
+ -- is shorter).
+ if x>=obs_x and x<=obs_x2 then
+  if abs(x-obs_x)<abs(x-obs_x2) then
+   -- push left
+   fix[1]=obs_x-x
+   fix[1]=min(fix[1],-0.5)
+  else
+   -- push right
+   fix[1]=obs_x2-x
+   fix[1]=max(fix[1],0.5)
+  end
+ else
+  -- no collision found
+  return nil
  end
 
- instance._collision=function(x,y,z)
-  return collision(
-   x,y,z,
-   instance.x+instance.col_x_ofst,
-   instance.x+instance.width-12,
-   instance.y,--+11
-   instance.y+16,
-   0,
-   -instance.height
+ -- correct the y, pushing the
+ -- point up or down (whichever
+ -- way the y move is shorter).
+ if y>=obs_y and y<=obs_y2 then
+  if abs(y-obs_y)<abs(y-obs_y2) then
+   -- push up
+   fix[2]=obs_y-y
+   fix[2]=min(fix[2],-0.5)
+  else
+   -- push down
+   fix[2]=obs_y2-y
+   fix[2]=max(fix[2],0.5)
+  end
+ else
+  -- no collision found
+  return nil
+ end
+
+ -- correct the z, pushing the
+ -- point upwards in the air
+ -- when needed.
+ if z<=obs_z and z>=obs_z2 then
+  fix[3]=obs_z2-z
+  fix[3]=min(fix[3],-0.5)
+ else
+  -- no collision found
+  return nil
+ end
+
+ return fix
+end
+
+-- performs a simple transition
+-- to allow moving from one
+-- screen to another nicely
+function transition(x,y,exit)
+ local patterns={
+  0b1111111111111111.1,
+  0b0111011101110111.1,
+  0b0011001100110011.1,
+  0b0001000100010001.1,
+  0b0000000000000000.1,
+ }
+ 
+ local start=patterns[1]
+ if not exit then
+  local start=patterns[#patterns]
+ end
+ 
+ local instance={
+  x=x,
+  y=y,
+  counter=0,
+  current=start,
+  finished=false,
+ }
+
+ instance._update=function()
+  local i=flr(instance.counter/5)+1
+  if not exit then
+   -- the order for the
+   -- patterns is inverted
+   -- for enter transitions
+   i=#patterns-i+1
+  end
+  
+  if i>=1 and i<=#patterns then
+   instance.current=patterns[i]
+   instance.counter+=1
+  else
+   instance.finished=true
+  end
+ end
+ 
+ instance._draw=function()
+  -- draw black vertical lines
+  fillp(instance.current)
+  rectfill(
+   instance.x,
+   instance.y,
+   instance.x+127,
+   instance.y+127,
+   0
   )
+  
+  -- restore everything
+  fillp(0b0000000000000000)
  end
  
  return instance

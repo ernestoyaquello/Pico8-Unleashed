@@ -37,6 +37,7 @@ function init(initial_state)
  bones={}
  obstacles={}
  to_render={}
+ garbage={}
  blocked_lane=nil
  bones_count=0
  bone_being_lost=false
@@ -158,6 +159,7 @@ function _update60()
    bi+=1
   else
    del(buildings,b)
+   add(garbage,b)
   end
  end
 
@@ -235,6 +237,7 @@ function _update60()
   else
    -- obstacle not within view
    del(obstacles,o)
+   add(garbage,o)
   end
  end
 
@@ -262,6 +265,7 @@ function _update60()
    and b.x<=scaffold_end_x)
   then
    del(bones,b)
+   add(garbage,b)
   else
    add(to_render,b)
    bi+=1
@@ -465,6 +469,15 @@ function _update60()
    enter_transition.y=cam_y
    enter_transition._update()
   end
+ end
+ 
+ -- dispose of the garbage,
+ -- but not often enough to
+ -- cause stutter
+ if #garbage>0
+ and meters%50==0
+ then
+  garbage={}
  end
 end
 
@@ -1535,16 +1548,13 @@ function create_building(x,y)
 
  -- make chimneys appear
  local chimney=flr(rnd(3))
+ local off=flr(rnd(2))
+ local off2=flr(rnd(2))
+ if(off2==0) off=1
  if chimney==1 then
-  local off=flr(rnd(2))
-  local off2=flr(rnd(2))
-  if(off2==0) off=1
   roof[3+off][2+off2]=107
   roof[4+off][2+off2]=123
  elseif chimney==2 then
-  local off=flr(rnd(2))
-  local off2=flr(rnd(2))
-  if(off2==0) off=1
   roof[3+off][6-off2]=-107
   roof[4+off][6-off2]=-123
  end
